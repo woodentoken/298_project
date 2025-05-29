@@ -11,7 +11,7 @@ META_FILTER = {
     "meta_direction": ['EW', 'WE'],
 }
 
-def main():
+def plot_velocities_and_power():
     data = pl.read_csv("master_data_set.csv").with_columns(
         absolute_time=pl.col("absolute_time").cast(pl.Datetime),
     )
@@ -66,5 +66,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    plot_velocities_and_power()
     print("Plots generated and saved in the 'plots' directory.")
