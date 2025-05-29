@@ -21,7 +21,7 @@ def plot_velocities_and_power():
                           META_FILTER["meta_direction"])
 
     for speed, stance, direction in combination:
-        figure, axes = plt.subplots(nrows=2, ncols=1, figsize=(10, 6))
+        figure, axes = plt.subplots(nrows=3, ncols=1, figsize=(10,8))
         subdata = data.filter(
             pl.col("meta_direction") == direction,
             pl.col("meta_speed_mph") == speed,
@@ -37,9 +37,18 @@ def plot_velocities_and_power():
         axes[0].plot(
             subdata["time"].to_numpy(),
             subdata["enhanced_speed"].to_numpy(),
-            label=f"Speed ({direction})",
+            label=f"Velocity ({direction})",
+            linewidth=2,
             color="orange",
         )
+        axes[0].plot(
+            subdata["time"].to_numpy(),
+            subdata["Speed"].to_numpy(),
+            label=f"Speed ({direction})",
+            linestyle='--',
+            color="red",
+        )
+
         axes[1].plot(
             subdata["time"].to_numpy(),
             subdata["power"].to_numpy(),
@@ -47,17 +56,48 @@ def plot_velocities_and_power():
             color="green",
         )
 
+        axes[2].plot(
+            subdata["time"].to_numpy(),
+            subdata["X"].to_numpy(),
+            label=f"X Acceleration ({direction})",
+            color="red",
+        )
+        axes[2].plot(
+            subdata["time"].to_numpy(),
+            subdata["Y"].to_numpy(),
+            label=f"Y Acceleration ({direction})",
+            color="orange",
+        )
+        axes[2].plot(
+            subdata["time"].to_numpy(),
+            subdata["Z"].to_numpy(),
+            label=f"Z Acceleration ({direction})",
+            color="blue",
+        )
+        axes[2].plot(
+            subdata["time"].to_numpy(),
+            subdata["G"].to_numpy(),
+            label=f"G Acceleration ({direction})",
+            color="black",
+            linewidth=3,
+        )
+        axes[2].set_ylabel("Acceleration (m/s²)")
+        axes[2].legend(loc='upper left')
+        axes[2].grid()
+        axes[2].set_xlabel("Time (s)")
+
         axes[0].set_xlabel("Time (s)")
         axes[0].set_ylabel("Velocity (m/s)")
         axes[0].set_ylim(0, 12)
-        axes[0].legend()
+        axes[0].legend(loc='upper right')
         axes[0].grid()
 
         axes[1].set_xlabel("Time (s)")
         axes[1].set_ylabel("Power (W)")
         axes[1].set_ylim(0, 500)
-        axes[1].legend()
+        axes[1].legend(loc='upper right')
         axes[1].grid()
+
 
         figure.suptitle(f"SPEED: {speed} mph - STANCE: {stance} - DIRECTION: {direction}")
         plt.tight_layout()

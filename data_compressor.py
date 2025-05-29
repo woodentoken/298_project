@@ -34,13 +34,16 @@ TIME_LOOKUP = {
 JOINT_KEEP = [
     "WindAD",
     "absolute_time",
-    # "time",
     "Wind (m/s)",
     "Speed",
     "X (m/s^2)",
     "Y (m/s^2)",
     "Z (m/s^2)",
     "G (m/s^2)",
+    "X",
+    "Y",
+    "Z",
+    "G",
     "meta_stance",
     "meta_speed_mph",
     "meta_direction",
@@ -92,13 +95,6 @@ def compress_data(folder_array):
                 df = raw_df.with_columns(
                     absolute_time=pl.col(TIME_LOOKUP[source_type]).cast(pl.Datetime),
                 ).drop(TIME_LOOKUP[source_type])
-
-                min_time = df["absolute_time"].min()
-                # df = df.with_columns(
-                #     pl.col("absolute_time").map_elements(
-                #     lambda row: (row - min_time).total_seconds(),
-                #     return_dtype=pl.Float64
-                # ).alias("time"))
 
                 # outsource type specific conversions and recasting to another function
                 df = handle_source_specifics(df, source_type, file)
