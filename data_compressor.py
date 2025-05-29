@@ -132,6 +132,10 @@ def handle_source_specifics(df, source_type, file):
             enhanced_altitude=pl.col("enhanced_altitude").cast(pl.Float64),  # altitude is in meters
             enhanced_speed=pl.col("enhanced_speed").cast(pl.Float64) * KM2MS,  # convert km/h to m/s
         )
+        # if the power data is larger than 1000, set the value to 0 (this is an outlier)
+        df = df.with_columns(
+            pl.when(pl.col("power") > 1000).then(0).otherwise(pl.col("power")).alias("power"),
+        )
 
     # convert wind to m/s
     if source_type == "wind":
