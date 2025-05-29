@@ -1,0 +1,13 @@
+[project]
+name = "mae298-project"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "ipdb>=0.13.13",
+    "matplotlib>=3.10.3",
+    "numpy>=2.2.6",
+    "polars>=1.30.0",
+    "ruff>=0.11.11",
+]
