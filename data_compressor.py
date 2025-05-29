@@ -27,17 +27,32 @@ TIME_LOOKUP = {
     "iphone": "Date",
 }
 
+# which final columns to keep in the joint dataset
+JOINT_KEEP = [
+    "WindAD",
+    "time",
+    "Wind (m/s)",
+    "Speed",
+    "X (m/s^2)",
+    "Y (m/s^2)",
+    "Z (m/s^2)",
+    "G (m/s^2)",
+    "meta_stance",
+    "meta_speed_mph",
+    "meta_direction",
+    "position_lat",
+    "position_long",
+    "heart_rate",
+    "cadence",
+    "distance",
+    "power",
+    "enhanced_speed",
+    "enhanced_altitude",
+]
+
 MPH2MS = 0.44704  # Conversion factor from miles per hour to meters per second
 GRAVITY = 9.81  # Acceleration due to gravity in m/s^2
 KM2MS = 1000 / 3600  # Conversion factor from kilometers per hour to meters per second
-
-class Dataset:
-    def __init__(self, data):
-        self.data = data
-
-    def plot(self):
-        plt.plot(self.data)
-        plt.show()
 
 
 def compress_data(folder_array):
@@ -83,16 +98,28 @@ def compress_data(folder_array):
         else:
             print(f"Folder {folder} does not exist.")
 
+    return construct_joint_set(datasets)
+
+
+def construct_joint_set(datasets):
     # construct a joint dataset by joining on the "time" column. times which do not coincide are dropped entirely
     joint_set = (
-        datasets["wind"]
-        .join(
-            datasets["iphone"],
-            on="time",
-            how="inner",
+        (
+            datasets["wind"]
+            .join(
+                datasets["iphone"],
+                on="time",
+                how="inner",
+            )
+            .join(datasets["garmin"], on="time", how="inner", suffix="xxx")
         )
-        .join(datasets["garmin"], on="time", how="inner", suffix="xxx")
+        .select(JOINT_KEEP)
+        .sort("time")
     )
+
+    # reorder columns to have "time" as the first column
+    joint_set = joint_set.select(["time"] + [col for col in joint_set.columns if col != "time"])
+    print(f"Joint dataset created with {joint_set.shape[0]} rows and {joint_set.shape[1]} columns.")
 
     return joint_set
 
@@ -102,8 +129,8 @@ def handle_source_specifics(df, source_type, file):
         df = df.with_columns(
             time=pl.col("time")
             - timedelta(hours=1),  # the garmin data is in a different DST zone, need to augment by 1 hour
-            enhanced_altitude = pl.col("enhanced_altitude").cast(pl.Float64), # altitude is in meters
-            enhanced_speed = pl.col("enhanced_speed").cast(pl.Float64)*KM2MS, # convert km/h to m/s
+            enhanced_altitude=pl.col("enhanced_altitude").cast(pl.Float64),  # altitude is in meters
+            enhanced_speed=pl.col("enhanced_speed").cast(pl.Float64) * KM2MS,  # convert km/h to m/s
         )
 
     # convert wind to m/s
@@ -132,7 +159,7 @@ if __name__ == "__main__":
     folder_array = ["Garmin_CSV_files", "Wind_sensor_data", "Iphone_CSV_files"]
     joint_set = compress_data(folder_array)
 
-    # TODO reorder data set so that time is the first column
-
     meta_filters = {"speed": ["13", "19"], "position": ["up", "drop", "mix"], "direction": ["EW", "WE"]}
     joint_set.write_csv("master_data_set.csv")
+    print("Master dataset saved as 'master_data_set.csv'.")
+    print("Data compression complete.")
