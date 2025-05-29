@@ -31,20 +31,20 @@ def plot_velocities_and_power():
         axes[0].plot(
             subdata["time"].to_numpy(),
             subdata["Wind (m/s)"].to_numpy(),
-            label=f"Wind Speed ({direction})",
+            label=f"Wind Speed",
             color="blue",
         )
         axes[0].plot(
             subdata["time"].to_numpy(),
             subdata["enhanced_speed"].to_numpy(),
-            label=f"Velocity ({direction})",
+            label=f"Garmin Velocity",
             linewidth=2,
             color="orange",
         )
         axes[0].plot(
             subdata["time"].to_numpy(),
             subdata["Speed"].to_numpy(),
-            label=f"Speed ({direction})",
+            label=f"Iphone Velocity",
             linestyle='--',
             color="red",
         )
@@ -52,32 +52,32 @@ def plot_velocities_and_power():
         axes[1].plot(
             subdata["time"].to_numpy(),
             subdata["power"].to_numpy(),
-            label=f"Power ({direction})",
+            label=f"Power",
             color="green",
         )
 
         axes[2].plot(
             subdata["time"].to_numpy(),
-            subdata["X"].to_numpy(),
-            label=f"X Acceleration ({direction})",
+            -subdata["X (m/s^2)"].to_numpy(),
+            label=f"X Acceleration",
             color="red",
         )
         axes[2].plot(
             subdata["time"].to_numpy(),
-            subdata["Y"].to_numpy(),
-            label=f"Y Acceleration ({direction})",
+            -subdata["Y (m/s^2)"].to_numpy(),
+            label=f"Y Acceleration",
             color="orange",
         )
         axes[2].plot(
             subdata["time"].to_numpy(),
-            subdata["Z"].to_numpy(),
-            label=f"Z Acceleration ({direction})",
+            -subdata["Z (m/s^2)"].to_numpy(),
+            label=f"Z Acceleration",
             color="blue",
         )
         axes[2].plot(
             subdata["time"].to_numpy(),
-            subdata["G"].to_numpy(),
-            label=f"G Acceleration ({direction})",
+            subdata["G (m/s^2)"].to_numpy(),
+            label=f"G Acceleration",
             color="black",
             linewidth=3,
         )
@@ -101,10 +101,10 @@ def plot_velocities_and_power():
 
         figure.suptitle(f"SPEED: {speed} mph - STANCE: {stance} - DIRECTION: {direction}")
         plt.tight_layout()
-        plt.savefig(f"plots/{direction}_speed_{speed}_stance_{stance}.png")
+        plt.savefig(f"_plots/{direction}_speed_{speed}_stance_{stance}.png")
 
 
 
 if __name__ == "__main__":
     plot_velocities_and_power()
-    print("Plots generated and saved in the 'plots' directory.")
+    print("Plots generated and saved in the '_plots' directory.")

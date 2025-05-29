@@ -7,8 +7,6 @@ from datetime import datetime, timedelta
 import ipdb
 from itertools import product
 
-# from IPython.core.debugger import Pdb; Pdb().set_trace()
-
 COLUMN_LOOKUP = {
     "garmin": [
         "timestamp",
@@ -181,9 +179,9 @@ def compute_time_diff(df):
     differential_time_df = pl.DataFrame()
     for stance, speed, direction in combinations:
         df = df_copy.filter(
-            (pl.col("meta_stance") == stance) &
-            (pl.col("meta_speed_mph") == speed) &
-            (pl.col("meta_direction") == direction)
+            (pl.col("meta_stance") == stance)
+            & (pl.col("meta_speed_mph") == speed)
+            & (pl.col("meta_direction") == direction)
         )
         # for each combination, compute the time difference from the first timestamp
         time_diff = df["absolute_time"] - df["absolute_time"].min()
@@ -197,11 +195,16 @@ def compute_time_diff(df):
 
     # save the joint dataset to a CSV file
     # reorder columns to have "time" as the first column
-    differential_time_df = differential_time_df.select(["time"] + [col for col in differential_time_df.columns if col != "time"])
+    differential_time_df = differential_time_df.select(
+        ["time"] + [col for col in differential_time_df.columns if col != "time"]
+    )
     differential_time_df.write_csv("master_data_set.csv")
-    print(f"Differential time dataset created with {differential_time_df.shape[0]} rows and {differential_time_df.shape[1]} columns.")
+    print(
+        f"Differential time dataset created with {differential_time_df.shape[0]} rows and {differential_time_df.shape[1]} columns."
+    )
 
     print("Dataset saved as 'master_data_set.csv'.")
+
 
 if __name__ == "__main__":
     folder_array = ["Garmin_CSV_files", "Wind_sensor_data", "Iphone_CSV_files"]
