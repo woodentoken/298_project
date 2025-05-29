@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "ipdb>=0.13.13",
+    "ipython>=9.2.0",
     "matplotlib>=3.10.3",
     "numpy>=2.2.6",
     "polars>=1.30.0",

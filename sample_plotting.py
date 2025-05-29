@@ -2,26 +2,32 @@ import polars as pl
 import numpy as np
 import matplotlib.pyplot as plt
 import ipdb
+from itertools import product
 
+# define which meta values to plot 
+META_FILTER = {
+    "meta_speed_mph": [13, 19],
+    "meta_stance": ['up', 'drop', 'mix'],
+    "meta_direction": ['EW', 'WE'],
+}
 
 def main():
     data = pl.read_csv("master_data_set.csv").with_columns(
-        time=pl.col("time").cast(pl.Datetime),
+        absolute_time=pl.col("absolute_time").cast(pl.Datetime),
     )
 
-    meta_filter = {
-        "meta_speed_mph": 19,
-        "meta_stance": "drop",
-    }
+    combination = product(META_FILTER["meta_speed_mph"],
+                          META_FILTER["meta_stance"],
+                          META_FILTER["meta_direction"])
 
-    data = data.filter(
-        pl.col("meta_speed_mph") == meta_filter["meta_speed_mph"],
-        pl.col("meta_stance") == meta_filter["meta_stance"],
-    )
-
-    for direction in ["EW", "WE"]:
+    for speed, stance, direction in combination:
         figure, axes = plt.subplots(nrows=2, ncols=1, figsize=(10, 6))
-        subdata = data.filter(pl.col("meta_direction") == direction)
+        subdata = data.filter(
+            pl.col("meta_direction") == direction,
+            pl.col("meta_speed_mph") == speed,
+            pl.col("meta_stance") == stance
+        )
+                
         axes[0].plot(
             subdata["time"].to_numpy(),
             subdata["Wind (m/s)"].to_numpy(),
@@ -41,17 +47,24 @@ def main():
             color="green",
         )
 
-        axes[0].set_xlabel("Time")
+        axes[0].set_xlabel("Time (s)")
         axes[0].set_ylabel("Velocity (m/s)")
+        axes[0].set_ylim(0, 12)
         axes[0].legend()
+        axes[0].grid()
 
-        axes[1].set_xlabel("Time")
+        axes[1].set_xlabel("Time (s)")
         axes[1].set_ylabel("Power (W)")
+        axes[1].set_ylim(0, 500)
+        axes[1].legend()
+        axes[1].grid()
 
-        figure.suptitle(f"SPEED: {meta_filter['meta_speed_mph']} mph - STANCE: {meta_filter['meta_stance']}")
+        figure.suptitle(f"SPEED: {speed} mph - STANCE: {stance} - DIRECTION: {direction}")
         plt.tight_layout()
-        plt.savefig(f"plots/{direction}_speed_{meta_filter['meta_speed_mph']}_stance_{meta_filter['meta_stance']}.png")
+        plt.savefig(f"plots/{direction}_speed_{speed}_stance_{stance}.png")
+
 
 
 if __name__ == "__main__":
     main()
+    print("Plots generated and saved in the 'plots' directory.")

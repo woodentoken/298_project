@@ -5,6 +5,9 @@ import os
 from copy import deepcopy
 from datetime import datetime, timedelta
 import ipdb
+from itertools import product
+
+# from IPython.core.debugger import Pdb; Pdb().set_trace()
 
 COLUMN_LOOKUP = {
     "garmin": [
@@ -30,7 +33,8 @@ TIME_LOOKUP = {
 # which final columns to keep in the joint dataset
 JOINT_KEEP = [
     "WindAD",
-    "time",
+    "absolute_time",
+    # "time",
     "Wind (m/s)",
     "Speed",
     "X (m/s^2)",
@@ -86,8 +90,16 @@ def compress_data(folder_array):
 
                 # unify the time columns (rename them to "time") and make them datetime opjects
                 df = raw_df.with_columns(
-                    time=pl.col(TIME_LOOKUP[source_type]).cast(pl.Datetime),
+                    absolute_time=pl.col(TIME_LOOKUP[source_type]).cast(pl.Datetime),
                 ).drop(TIME_LOOKUP[source_type])
+
+                min_time = df["absolute_time"].min()
+                # df = df.with_columns(
+                #     pl.col("absolute_time").map_elements(
+                #     lambda row: (row - min_time).total_seconds(),
+                #     return_dtype=pl.Float64
+                # ).alias("time"))
+
                 # outsource type specific conversions and recasting to another function
                 df = handle_source_specifics(df, source_type, file)
 
@@ -108,17 +120,17 @@ def construct_joint_set(datasets):
             datasets["wind"]
             .join(
                 datasets["iphone"],
-                on="time",
+                on="absolute_time",
                 how="inner",
             )
-            .join(datasets["garmin"], on="time", how="inner", suffix="xxx")
+            .join(datasets["garmin"], on="absolute_time", how="inner", suffix="xxx")
         )
         .select(JOINT_KEEP)
-        .sort("time")
+        .sort("absolute_time")
     )
 
-    # reorder columns to have "time" as the first column
-    joint_set = joint_set.select(["time"] + [col for col in joint_set.columns if col != "time"])
+    # reorder columns to have "absolute_time" as the first column
+    joint_set = joint_set.select(["absolute_time"] + [col for col in joint_set.columns if col != "absolute_time"])
     print(f"Joint dataset created with {joint_set.shape[0]} rows and {joint_set.shape[1]} columns.")
 
     return joint_set
@@ -127,7 +139,7 @@ def construct_joint_set(datasets):
 def handle_source_specifics(df, source_type, file):
     if source_type == "garmin":
         df = df.with_columns(
-            time=pl.col("time")
+            absolute_time=pl.col("absolute_time")
             - timedelta(hours=1),  # the garmin data is in a different DST zone, need to augment by 1 hour
             enhanced_altitude=pl.col("enhanced_altitude").cast(pl.Float64),  # altitude is in meters
             enhanced_speed=pl.col("enhanced_speed").cast(pl.Float64) * KM2MS,  # convert km/h to m/s
@@ -159,11 +171,45 @@ def handle_source_specifics(df, source_type, file):
     return df
 
 
+def compute_time_diff(df):
+    # find all unique combinations of stance, speed, and direction
+    stances = df["meta_stance"].unique().to_list()
+    speeds = df["meta_speed_mph"].unique().to_list()
+    directions = df["meta_direction"].unique().to_list()
+    # create a cartesian product of the unique values
+    combinations = list(product(stances, speeds, directions))
+
+    # need to make a copy of the dataframe to avoid modifying the original one
+    df_copy = deepcopy(df)
+
+    differential_time_df = pl.DataFrame()
+    for stance, speed, direction in combinations:
+        df = df_copy.filter(
+            (pl.col("meta_stance") == stance) &
+            (pl.col("meta_speed_mph") == speed) &
+            (pl.col("meta_direction") == direction)
+        )
+        # for each combination, compute the time difference from the first timestamp
+        time_diff = df["absolute_time"] - df["absolute_time"].min()
+        time_diff = time_diff.map_elements(lambda x: x.seconds, return_dtype=pl.Int64)
+        # compute time in seconds from the first timestamp
+        df = df.with_columns(
+            time=time_diff,
+        )
+        # save the filtered dataframe to a CSV file
+        differential_time_df = pl.concat([differential_time_df, df])
+
+    # save the joint dataset to a CSV file
+    # reorder columns to have "time" as the first column
+    differential_time_df = differential_time_df.select(["time"] + [col for col in differential_time_df.columns if col != "time"])
+    differential_time_df.write_csv("master_data_set.csv")
+    print(f"Differential time dataset created with {differential_time_df.shape[0]} rows and {differential_time_df.shape[1]} columns.")
+
+    print("Dataset saved as 'master_data_set.csv'.")
+
 if __name__ == "__main__":
     folder_array = ["Garmin_CSV_files", "Wind_sensor_data", "Iphone_CSV_files"]
     joint_set = compress_data(folder_array)
+    compute_time_diff(joint_set)
 
-    meta_filters = {"speed": ["13", "19"], "position": ["up", "drop", "mix"], "direction": ["EW", "WE"]}
-    joint_set.write_csv("master_data_set.csv")
-    print("Master dataset saved as 'master_data_set.csv'.")
     print("Data compression complete.")
