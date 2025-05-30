@@ -11,4 +11,5 @@ dependencies = [
     "numpy>=2.2.6",
     "polars>=1.30.0",
     "ruff>=0.11.11",
+    "scipy>=1.15.3",
 ]
