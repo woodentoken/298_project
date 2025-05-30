@@ -9,60 +9,83 @@ def load_data(file_path, start_row, end_row):
     return df_new
 
 # EKF one-step: 
-# state = [v, CdA, accel_bias] 
-def ekf_cda_step(x, P, accel_meas, slope_rad, wind_speed, power_meas, dt, mass, rho, Crr, Q, R):
+# state = [v, accel_bias] 
+def ekf_cda_step(slope_rad, wind_speed, dt, mass, rho, Crr, Q, R, x=x, P=P, u=u, y=y):
     """
     x           : [v, CdA, bias] State vector
     P           : 3×3 covariance
     accel_meas  : measured longitudinal accel (m/s²)
     slope_rad   : road pitch (rad)
     wind_speed  : air-relative wind speed (m/s)
-    power_meas  : power meter (W)
+    y           : power meter (W)
     dt          : time step (s)
     mass, rho   : constants
     Crr         : rolling-resistance coefficient
     Q           : 3×3 process noise
     R           : scalar power-meas noise variance
     """
+    CdA_pred = 0.3
     g = 9.80665
-    v, CdA, bias = x
+
+    # v, acceleration_bias = x
 
     # Prediction
-    accel_true = accel_meas + bias
-    v_pred     = v + accel_true * dt
-    CdA_pred   = CdA
-    bias_pred  = bias     
+    # accel_true = accel_meas + bias
+    # v_pred     = v + acceleration_bias + u * dt
+    # CdA_pred   = CdA
 
-    x_pred = np.array([v_pred, CdA_pred, bias_pred])
+    # x_pred = np.array([v_pred, acceleration_bias])
 
-    # Jacobian F = df/dx (3×3)
-    F = np.array([
-        [1.0, 0.0, dt],
-        [0.0, 1.0, 0.0],
-        [0.0, 0.0, 1.0]
+    # PREDICTION
+    A_prime = np.array([
+        [1.0, 1.0],
+        [0.0, 1.0]
     ])
-    P_pred = F @ P @ F.T + Q
+    B_prime = np.array([
+        [dt],
+        [0.0]
+    ])
+    # noise is added linearly to both states
+    E_prime = np.array([
+        [1.0, 0.0],
+        [0.0, 1.0],
+    ])
+    x_pred = A_prime @ x + B_prime * u
+    P_pred = A_prime @ P @ A_prime.T  +  E_prime @ Q @ E_prime.T
 
-    # Measurement update
+    # MEASUREMENT UPDATE
     F_aero = 0.5 * rho * CdA_pred * wind_speed**2
     F_grav = mass * g * np.sin(slope_rad)
     F_roll = mass * g * Crr * np.cos(slope_rad)
-    power_pred = v_pred * (F_aero + F_grav + F_roll + mass * accel_true)
+    power_pred = x_pred[0] * (F_aero + F_grav + F_roll + mass * u)
     y = power_meas - power_pred
 
-    # Measurement Jocobian H = dh/dx  (1×3)
-    dPdv   = (F_aero + F_grav + F_roll + mass * accel_true)
-    dPdCdA = 0.5 * rho * v_pred * wind_speed**2
-    dPdb   = mass * v_pred
-    H = np.array([[dPdv, dPdCdA, dPdb]])
+    # Measurement Jacobian H = dh/dx  (1×3)
+    dh_dv   = (F_aero + F_grav + F_roll + mass * u)
+    # dh_dCdA = 0.5 * rho * x_pred[0] * wind_speed**2
+    dh_dbias   = mass * x_pred[1]
+
+    # linearize the measurement equation based on the state
+    C_prime = np.array([
+        [dh_dv, 0],
+    ])
+    # no input in measurment equation
+    D_prime = np.array([
+        [0.0],  # dP/dv
+    ])
+    # noise is added in the measurement equation
+    F_prime = np.array([
+        [1.0],  # dP/dv
+    ])
 
     # 4) KALMAN GAIN & UPDATE
-    S     = H @ P_pred @ H.T + R         
-    K     = (P_pred @ H.T) / S           
-    x_new = x_pred + (K.flatten() * y)
-    P_new = (np.eye(3) - K @ H) @ P_pred
+    L        = P_pred @ C_prime.T * np.linalg.inv(C_prime @ P_pred @ C_prime.T + F_prime @ R @ F_prime.T)        
+    residual = y - (C_prime @ x_pred + D_prime * u)    
 
-    return x_new, P_new, power_pred
+    x_est = x_pred + L @ residual
+    P_est = P_pred - (L @ C_prime @ P_pred)
+
+    return x_est, P_est, power_pred
 
 if __name__ == "__main__":
     df = load_data("master_data_set.csv", 829, 1024)
@@ -72,12 +95,12 @@ if __name__ == "__main__":
     mass      = 82.6
     rho       = 1.20
     Crr       = 0.005
-    Q         = np.diag([0.005, 0.005, 0.005])  
-    R         = 50                               
+    Q         = np.diag([0.25, 0.05])  
+    R         = 10                               
 
     # Initial state
     v0   = float(df["Speed"].iloc[0])
-    x    = np.array([v0, 0.30, 0.0])      # [v, CdA, bias]
+    x    = np.array([v0, 0.0])      # [v, CdA, bias]
     P    = np.diag([0, 0, 0])
 
     # Output
@@ -96,20 +119,20 @@ if __name__ == "__main__":
         dist, dist0   = df["distance"].iloc[k], df["distance"].iloc[k-1]
         slope_rad     = np.arctan((alt-alt0)/max(dist-dist0, 0.5))
 
-        x, P, _ = ekf_cda_step(x, P,
-                              accel_meas, slope_rad, wind_speed, power_meas,
-                              dt, mass, rho, Crr, Q, R)
+        x, P, _ = ekf_cda_step(slope_rad, wind_speed,
+                              dt, mass, rho, Crr, Q, R, x=x, P=P,
+                              u=accel_meas, y=power_meas, )
 
         times.append(df["absolute_time"].iloc[k])
         v_est.append(x[0])
-        CdA_est.append(x[1])
-        bias_est.append(x[2])
+        # CdA_est.append(x[1])
+        bias_est.append(x[1])
 
     # Build and show results
     df_est = pd.DataFrame({
         "time":       times,
         "v_est":      v_est,
-        "CdA_est":    CdA_est,
+        # "CdA_est":    CdA_est,
         "accel_bias": bias_est
     })
     print(df_est.head())
@@ -117,15 +140,21 @@ if __name__ == "__main__":
     plt.figure(figsize=(10,4))
     plt.plot(np.array(df["absolute_time"]), np.array(df["enhanced_speed"]), label="Actual Speed")
     plt.plot(np.array(times), np.array(v_est), label="EKF Speed", color='red')
-    plt.legend(); plt.title("Velocity: EKF vs Measured"); plt.grid(); plt.show()
+    plt.legend()
+    plt.title("Velocity: EKF vs Measured")
+    plt.grid()
+    plt.show()
 
-    plt.figure(figsize=(10,4))
-    plt.plot(np.array(times), np.array(CdA_est), color='purple')
-    plt.title("Estimated $C_dA$"); plt.ylabel("CdA (m²)"); plt.grid(); plt.show()
+    # plt.figure(figsize=(10,4))
+    # plt.plot(np.array(times), np.array(CdA_est), color='purple')
+    # plt.title("Estimated $C_dA$"); plt.ylabel("CdA (m²)"); plt.grid(); plt.show()
 
 
     # Plot acceleration input
     plt.figure(figsize=(10,4))
     plt.plot(np.array(times), np.array(df["Y (m/s^2)"].iloc[1:]), label="Measured Acceleration", color='orange')
     plt.plot(np.array(times), np.array(bias_est), label="Estimated Bias", color='green')
-    plt.legend(); plt.title("Acceleration Bias Estimation"); plt.grid(); plt.show()
+    plt.legend()
+    plt.title("Acceleration Bias Estimation")
+    plt.grid()
+    plt.show()
