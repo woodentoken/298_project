@@ -14,7 +14,7 @@ def main():
     rho = 1.20
     Crr = 0.005
     Q = np.diag([0.25, 0.05])
-    R = np.diag([200])
+    R = np.diag([20000])
 
     # Initial state
     length = len(df["time"])
@@ -160,8 +160,6 @@ def ekf_cda_step(slope_rad, wind_speed, dt, mass, rho, Crr, Q, R, states, varian
 
     x_est = x_pred + L * residual
     P_est = P_pred - (L @ C_prime @ P_pred)
-
-    # ipdb.set_trace()
 
     return x_est, P_est, power_pred, residual, L
 
