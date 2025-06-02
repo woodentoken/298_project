@@ -69,12 +69,22 @@ def main():
             accel_meas[k - 1],
             power_meas[k - 1],
         )
-    
-    # ipdb.set_trace()
-    # return x, P, residuals, kalman_gains
 
-    plotting(df, x, P, residuals, kalman_gains)
-    
+    ekf_df = pd.DataFrame(
+        {
+            "t": df["time"],
+            "v_est": x[:, 0, 0],
+            # "CdA_est": x[:, 1, 0],
+            "accel_bias": x[:, 1, 0],
+            "residuals": residuals,
+            "kalman_gains_1": kalman_gains[:, 0, 0],
+            "kalman_gains_2": kalman_gains[:, 1, 0],
+            "slope_deg": slope_rad * 180 / np.pi,
+            "wind_speed": wind_speed,
+        })
+
+    plotting(df, ekf_df)
+
 
 def load_data(file_path, start_row, end_row):
     df = pd.read_csv(file_path)
@@ -175,14 +185,14 @@ def ekf_cda_step(slope_rad, wind_speed, dt, mass, rho, Crr, Q, R, states, varian
     # print(df_est.head())
 
 
-def plotting(df, x, P, residuals, kalman_gains):
+def plotting(df, ekf_df):
     t = df["time"]
 
     figure, axes = plt.subplots(3, 1, figsize=(10, 12))
 
     # plt.figure(figsize=(10, 4))
-    axes[0].plot(t, np.array(df["enhanced_speed"]), label="Actual Speed")
-    axes[0].plot(t, x[:, 0, :], label="EKF Speed", color="red")
+    axes[0].plot(t, df["enhanced_speed"], label="Actual Speed")
+    axes[0].plot(t, ekf_df["v_est"], label="EKF Speed", color="red")
     # axes[0].plot(np.array(t), ol_velocity, label="Bias Speed", color="red")
     axes[0].legend()
     axes[0].set_title("Velocity: EKF vs Measured")
@@ -194,13 +204,13 @@ def plotting(df, x, P, residuals, kalman_gains):
 
     # Plot acceleration input
     # plt.figure(figsize=(10, 4))
-    axes[1].plot(t, np.array(df["Y (m/s^2)"].iloc[0:]), label="Measured Acceleration", color="orange")
-    axes[1].plot(t, x[:, 1, :], label="Estimated Bias", color="green")
+    axes[1].plot(t, df["Y (m/s^2)"], label="Measured Acceleration", color="orange")
+    axes[1].plot(t, ekf_df["accel_bias"], label="Estimated Bias", color="green")
     axes[1].legend()
     axes[1].set_title("Acceleration Bias Estimation")
     axes[1].grid()
 
-    axes[2].plot(t, residuals, label="Residuals", color="black")
+    axes[2].plot(t, ekf_df["residuals"], label="Residuals", color="black")
     # axes[2].plot(t, np.array(bias_est), label="Estimated Bias", color="green")
     axes[2].legend()
     axes[2].set_title("Residuals (y - h(x))")
