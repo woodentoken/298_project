@@ -259,7 +259,7 @@ if __name__ == "__main__":
     stop_distance = 805 # meters - 0.5 mile x 1609.34 ~ 805 meters
 
     # Loop through LOG number from 001 to 006 and save to 
-    for i in range(1, 2):
+    for i in range(1, 7):
         log_number_str = f"{i:03}"  # Format as "001", "002", etc.
         test_case_string = test_case_generator(log_number_str, test_date, stop_distance)
         print(f"Generated Test Case: {test_case_string}")
