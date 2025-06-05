@@ -86,6 +86,11 @@ def process_garmin_data(log_number_str, test_date, stop_distance):
             delta_alt = df.loc[i, 'altitude (m)'] - df.loc[i - 1, 'altitude (m)']
             df.loc[i, 'gradient (rad)'] = np.arctan(delta_alt / delta_dist)
 
+    # Calculate the estimated acceleration based on the change in velocity
+    df['estimated_acceleration (m/s^2)'] = df['velocity (m/s)'].diff() / df['time'].diff().dt.total_seconds()
+    df['estimated_acceleration (m/s^2)'].fillna(0, inplace=True)
+
+
     # Filter out rows where distance is greater than the stop distance
     df_filtered = df[df['distance (m)'] <= stop_distance].copy()
     df_cleaned = df_filtered.reset_index(drop=True)
@@ -278,6 +283,12 @@ if __name__ == "__main__":
         plt.figure(figsize=(12, 6))
         plt.plot(wind_speed_df_upsampled['time'].to_numpy(), wind_speed_df_upsampled['wind_speed (m/s)'].to_numpy(), label='Wind Speed (m/s)', color='blue')
         plt.plot(wind_speed_df['time'].to_numpy(), wind_speed_df['wind_speed (m/s)'].to_numpy(), label='Original Wind Speed (m/s)', color='orange', linestyle='--')
+        plt.show()
+
+
+        plt.figure(figsize=(12, 6))
+        plt.plot(accel_df['time'].to_numpy(), accel_df['acceleration_y_LOWPASS_filtered (m/s^2)'].to_numpy(), label='Acceleration Y (m/s²)', color='blue')
+        plt.plot(garmin_df_upsampled['time'].to_numpy(), garmin_df_upsampled['estimated_acceleration (m/s^2)'].to_numpy(), label='Estimated Acceleration (m/s²)', color='orange', linestyle='--')
         plt.show()
 
         plt.figure(figsize=(12, 6))

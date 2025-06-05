@@ -60,35 +60,35 @@ def transform_unscented(sigmas, Wm, Wc, noise_cov):
     P     = Y.T @ np.diag(Wc) @ Y + noise_cov 
     return x_bar, P
 
-def f_process(x, u, dt, accel_minus_bias=True):
+def f_process(x, u, dt):
     """
-    state = [v, CdA, bias]
+    state = [v, a, CdA]
     """
-    v, cda, b = x
-    if accel_minus_bias:
-        v_next = v + (u - b) * dt
-    else:                      # try the opposite sign once
-        v_next = v + (u + b) * dt
-    return np.array([v_next, cda, b])
+    v, CdA = x
+    a = u  # directly use input acceleration
+    v_next = v + a * dt
+    return np.array([v_next, CdA])
 
 def h_measure(sigma, rho_air, mass, slope_rad, wind_speed,
               accel_meas, Crr, eta_drive):
-
-    v, CdA, bias = sigma
+    """
+    sigma = [v, CdA]
+    accel_meas = externally measured a_long
+    """
+    v, CdA = sigma
     g = 9.80665
-
-    v_air = wind_speed           
-    a_long = accel_meas - bias
+    v_air = wind_speed
 
     F_aero = 0.5 * rho_air * CdA * v_air**2
     F_grav = mass * g * np.sin(slope_rad)
     F_roll = mass * g * Crr * np.cos(slope_rad)
-    F_acc  = mass * a_long
+    F_acc  = mass * accel_meas   # input from sensors
 
-    P_wheel = (F_aero + F_grav + F_roll + F_acc) * v      
+    P_wheel = (F_aero + F_grav + F_roll + F_acc) * v
     P_crank = P_wheel / eta_drive
 
     return np.array([P_crank])
+
 
 
 def ukf_cda_step(x, P,
@@ -100,21 +100,22 @@ def ukf_cda_step(x, P,
                  accel_minus_bias=True):   
     
     # UKF prediction 
-    n   = 3
+    n   = 2
     lam = alpha**2 * (n + kappa) - n
     Wm  = np.full(2*n+1, 0.5/(n+lam))
     Wc = Wm.copy()
     Wm[0] = lam/(n+lam); Wc[0] = Wm[0] + (1-alpha**2+beta)
     sigmas = sigma_points(x, P, lam)
-    sig_f  = np.array([f_process(s, accel_meas, dt, accel_minus_bias) for s in sigmas])
+    sig_f  = np.array([f_process(s, accel_meas, dt) for s in sigmas])
+
     x_pred, P_pred = transform_unscented(sig_f, Wm, Wc, Q)
 
     #  Measurement update
-    sig_h = np.zeros((2*n+1, 1))
-    for i,s in enumerate(sig_f):
-        sig_h[i,0] = h_measure(s, rho_air, mass, slope_rad,
-                               wind_speed, accel_meas,
-                               Crr, eta_drive)[0]
+    sig_h = np.zeros((2 * n + 1, 1))
+    for i, s in enumerate(sig_f):
+        sig_h[i, 0] = h_measure(s, rho_air, mass, slope_rad, wind_speed,
+                                accel_meas, Crr, eta_drive)[0]
+
 
     y_pred, Pyy = transform_unscented(sig_h, Wm, Wc,
                                        np.array([[(eta_drive**2)*R_crank]]))
@@ -135,8 +136,7 @@ def ukf_cda_step(x, P,
 
     # clamp state to physical bounds 
     x_new[0] = np.clip(x_new[0], 0.0, 30.0)     # v
-    x_new[1] = np.clip(x_new[1], 0.0, 1.2)     # CdA
-    x_new[2] = np.clip(x_new[2], -9.81, 9.81)     # bias 
+    x_new[1] = np.clip(x_new[1], 0.05, 1.2)     # CdA
     return x_new, P_new, P_crank_pred
 
 
@@ -163,17 +163,16 @@ if __name__ == "__main__":
 
     # Process‐noise covariance
     Q = np.diag([
-        (0.2)**2,        # v
-        (0.1)**2,       # CdA 
-        (0.1)**2         # bias
+        (0.05)**2,        # v
+        (0.001)**2,       # CdA 
     ])
 
-    R_crank = 100.0   
+    R_crank = 10.0   
 
     # Initial state & covariance
     v0 = float(df["velocity (m/s)"].iloc[0])
-    x = np.array([v0, 0.3, 0.1])    # [v, CdA, bias]
-    P = np.diag([0.01, 0.01, 0.01])
+    x  = np.array([v0, 0.30])    # [v, CdA, bias]
+    P  = np.diag([0.005, 0.005])   # initial uncertainty
 
     # Initialize output lists
     times, v_est, CdA_est, bias_est, power_pred_buf = [], [], [], [], []
@@ -205,14 +204,12 @@ if __name__ == "__main__":
         times.append(df["time"].iloc[k])
         v_est.append(x[0])
         CdA_est.append(x[1])
-        bias_est.append(x[2])
         power_pred_buf.append(P_crank_pred)
 
     df_est = pd.DataFrame({
         "time":       times,
         "v_est":      v_est,
         "CdA_est":    CdA_est,
-        "accel_bias": bias_est,
         "power_pred": power_pred_buf
     })
     print(df_est.head())
@@ -220,10 +217,10 @@ if __name__ == "__main__":
     # Create a single figure with 4 subplots and save to 'plot' folder
 
     # Ensure the plot directory exists
-    plot_dir = "plot"
+    plot_dir = "plot_no_bias"
     os.makedirs(plot_dir, exist_ok=True)
 
-    fig, axs = plt.subplots(4, 1, figsize=(12, 14), sharex=True)
+    fig, axs = plt.subplots(3, 1, figsize=(12, 14), sharex=True)
 
     # Speed subplot
     axs[0].plot(np.array(df["time"]), np.array(df["velocity (m/s)"]), label="Measured Speed")
@@ -239,22 +236,15 @@ if __name__ == "__main__":
     axs[1].set_title("UKF: Estimated $C_dA$")
     axs[1].grid(True)
 
-    # Bias subplot
-    axs[2].plot(np.array(times), np.array(df["estimated_acceleration (m/s^2)"].iloc[1:]), label="Measured Acceleration", color="orange")
-    axs[2].plot(np.array(times), np.array(bias_est), label="Estimated Bias", color="green")
-    axs[2].set_ylabel("m/s²")
-    axs[2].set_title("UKF: Acceleration Bias Estimation")
-    axs[2].legend()
-    axs[2].grid(True)
 
     # Power subplot
-    axs[3].plot(np.array(times), np.array(df["power (W)"].iloc[1:]), label="Measured Power", color="blue")
-    axs[3].plot(np.array(times), np.array(power_pred_buf), label="Predicted Power", color="orange")
-    axs[3].set_xlabel("Time")
-    axs[3].set_ylabel("Power (W)")
-    axs[3].set_title("UKF: Predicted Power vs Measured")
-    axs[3].legend()
-    axs[3].grid(True)
+    axs[2].plot(np.array(times), np.array(df["power (W)"].iloc[1:]), label="Measured Power", color="blue")
+    axs[2].plot(np.array(times), np.array(power_pred_buf), label="Predicted Power", color="orange")
+    axs[2].set_xlabel("Time")
+    axs[2].set_ylabel("Power (W)")
+    axs[2].set_title("UKF: Predicted Power vs Measured")
+    axs[2].legend()
+    axs[2].grid(True)
 
     plt.tight_layout()
     save_path = os.path.join(plot_dir, f"ukf_results_{log_number_str}_{test_date}_{stop_distance}m.png")
