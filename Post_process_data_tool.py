@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from scipy.signal import butter, filtfilt
 import os
 
-def butter_lowpass_filter(data, cutoff=1.5, fs=100.0, order=4):
+def butter_lowpass_filter(data, cutoff=0.75, fs=100.0, order=3):
     nyq = 0.5 * fs
     normal_cutoff = cutoff / nyq
     b, a = butter(order, normal_cutoff, btype='low', analog=False)
@@ -87,9 +87,10 @@ def process_garmin_data(log_number_str, test_date, stop_distance):
             df.loc[i, 'gradient (rad)'] = np.arctan(delta_alt / delta_dist)
 
     # Calculate the estimated acceleration based on the change in velocity
-    df['estimated_acceleration (m/s^2)'] = df['velocity (m/s)'].diff() / df['time'].diff().dt.total_seconds()
-    df['estimated_acceleration (m/s^2)'].fillna(0, inplace=True)
-
+    est_acc = df['velocity (m/s)'].diff() / df['time'].diff().dt.total_seconds()
+    est_acc = est_acc.shift(-1)  
+    est_acc.iloc[-1] = est_acc.iloc[-2]
+    df['estimated_acceleration (m/s^2)'] = est_acc.fillna(0)
 
     # Filter out rows where distance is greater than the stop distance
     df_filtered = df[df['distance (m)'] <= stop_distance].copy()
@@ -171,9 +172,9 @@ def process_wind_speed_data(log_number_str, test_date, start_time, stop_time):
     file_name = f"Raw_data/Test_{test_date}/Wind_sensor_CSV_files/LOG_{log_number_str}.csv"
     df_raw = pd.read_csv(file_name)
 
-    # Keep only Time & WindMPS, rename columns
-    df = df_raw[['Time', 'WindMPS']].copy()
-    df.columns = ['time', 'wind_speed (m/s)']
+    # Keep only Time, WindMPS, and TempC; rename columns
+    df = df_raw[['Time', 'WindMPS', 'TempC']].copy()
+    df.columns = ['time', 'wind_speed (m/s)', 'temperature (C)']
 
     # Convert 'time' to datetime64 and sort
     df['time'] = pd.to_datetime(df['time'])
@@ -185,18 +186,26 @@ def process_wind_speed_data(log_number_str, test_date, start_time, stop_time):
     # Trim to start_time, stop_time window
     df = df[(df['time'] >= start_time) & (df['time'] <= stop_time)].reset_index(drop=True)
 
+    # Group by each second for wind speed and temperature
     df['sec'] = df['time'].dt.floor('S')
-    df_grouped = df.groupby('sec')['wind_speed (m/s)'].mean().reset_index()
-    df_grouped.columns = ['time','wind_speed (m/s)']
+    df_grouped = df.groupby('sec').agg({
+        'wind_speed (m/s)': 'mean',
+        'temperature (C)': 'mean'
+    }).reset_index()
+    df_grouped.columns = ['time', 'wind_speed (m/s)', 'temperature (C)']
 
     t0 = start_time.floor('S')
     t1 = stop_time.ceil('S')
     full_seconds = pd.DataFrame({'time': pd.date_range(start=t0, end=t1, freq='1S')})
 
+    # Merge wind speed and temperature onto the full seconds index
     df_1hz = full_seconds.merge(df_grouped, on='time', how='left')
 
+    # Fill missing values for both columns
     df_1hz['wind_speed (m/s)'].fillna(method='ffill', inplace=True)
     df_1hz['wind_speed (m/s)'].fillna(method='bfill', inplace=True)
+    df_1hz['temperature (C)'].fillna(method='ffill', inplace=True)
+    df_1hz['temperature (C)'].fillna(method='bfill', inplace=True)
 
     return df_1hz
 
@@ -242,6 +251,7 @@ def combine_upsampled_dataframes(garmin_upsampled_df, wind_sensor_upsampled_df, 
 
     combined = g.copy()
     combined['wind_speed (m/s)'] = w['wind_speed (m/s)']
+    combined['temperature (C)'] = w['temperature (C)']
     combined['acceleration_x (m/s^2)']           = a['acceleration_x (m/s^2)']
     combined['acceleration_y (m/s^2)']           = a['acceleration_y (m/s^2)']
     combined['acceleration_z (m/s^2)']           = a['acceleration_z (m/s^2)']
@@ -275,26 +285,26 @@ if __name__ == "__main__":
         # Upsample wind speed data to match acceleration data
         wind_speed_df_upsampled = upsampling_function(wind_speed_df, 100)
 
-        plt.figure(figsize=(12, 6))
-        plt.plot(garmin_df_upsampled['time'].to_numpy(), garmin_df_upsampled['velocity (m/s)'].to_numpy(), label='Velocity (m/s)', color='green')
-        plt.plot(garmin_df['time'].to_numpy(), garmin_df['velocity (m/s)'].to_numpy(), label='Original Velocity (m/s)', color='red', linestyle='--')
-        plt.show()
+        # plt.figure(figsize=(12, 6))
+        # plt.plot(garmin_df_upsampled['time'].to_numpy(), garmin_df_upsampled['velocity (m/s)'].to_numpy(), label='Velocity (m/s)', color='green')
+        # plt.plot(garmin_df['time'].to_numpy(), garmin_df['velocity (m/s)'].to_numpy(), label='Original Velocity (m/s)', color='red', linestyle='--')
+        # plt.show()
 
-        plt.figure(figsize=(12, 6))
-        plt.plot(wind_speed_df_upsampled['time'].to_numpy(), wind_speed_df_upsampled['wind_speed (m/s)'].to_numpy(), label='Wind Speed (m/s)', color='blue')
-        plt.plot(wind_speed_df['time'].to_numpy(), wind_speed_df['wind_speed (m/s)'].to_numpy(), label='Original Wind Speed (m/s)', color='orange', linestyle='--')
-        plt.show()
+        # plt.figure(figsize=(12, 6))
+        # plt.plot(wind_speed_df_upsampled['time'].to_numpy(), wind_speed_df_upsampled['wind_speed (m/s)'].to_numpy(), label='Wind Speed (m/s)', color='blue')
+        # plt.plot(wind_speed_df['time'].to_numpy(), wind_speed_df['wind_speed (m/s)'].to_numpy(), label='Original Wind Speed (m/s)', color='orange', linestyle='--')
+        # plt.show()
 
 
         plt.figure(figsize=(12, 6))
         plt.plot(accel_df['time'].to_numpy(), accel_df['acceleration_y_LOWPASS_filtered (m/s^2)'].to_numpy(), label='Acceleration Y (m/s²)', color='blue')
-        plt.plot(garmin_df_upsampled['time'].to_numpy(), garmin_df_upsampled['estimated_acceleration (m/s^2)'].to_numpy(), label='Estimated Acceleration (m/s²)', color='orange', linestyle='--')
+        plt.plot(accel_df['time'].to_numpy(), accel_df['acceleration_y (m/s^2)'].to_numpy(), label='Estimated Acceleration (m/s²)', color='orange', linestyle='--')
         plt.show()
 
-        plt.figure(figsize=(12, 6))
-        plt.plot(accel_df['time'].to_numpy(), accel_df['acceleration_y_LOWPASS_filtered (m/s^2)'].to_numpy(), label='Filtered Acceleration Y (m/s²)', color='red')
-        #plt.plot(accel_df['time'].to_numpy(), accel_df['acceleration_y (m/s^2)'].to_numpy(), label='Original Acceleration Y (m/s²)', color='orange', linestyle='--', alpha=0.5)
-        plt.show()
+        # plt.figure(figsize=(12, 6))
+        # plt.plot(accel_df['time'].to_numpy(), accel_df['acceleration_y_LOWPASS_filtered (m/s^2)'].to_numpy(), label='Filtered Acceleration Y (m/s²)', color='red')
+        # #plt.plot(accel_df['time'].to_numpy(), accel_df['acceleration_y (m/s^2)'].to_numpy(), label='Original Acceleration Y (m/s²)', color='orange', linestyle='--', alpha=0.5)
+        # plt.show()
 
 
         # Save the processed data to CSV files

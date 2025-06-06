@@ -27,7 +27,7 @@ def test_case_generator(log_number_str, test_date, stop_distance):
         raise ValueError("Invalid log number string. Must be '001', '002', etc.")
     
     test_case_string = f"Test_{test_date}_{target_speed}_{position}_{direction}_StopAT_{stop_distance}m"
-
+    print(f"Generated test case string: {test_case_string}")
     return test_case_string
 
 def load_upsampled_processed_df(log_number_str, test_date, stop_distance):
@@ -79,6 +79,18 @@ def h_measure(sigma, rho_air, mass, slope_rad,
     P_crank = P_wheel / eta_drive
     return np.array([P_crank])
 
+def rho_calculator(temperature, altitude):
+    """Calculate air density based on temperature and altitude."""
+    # Constants
+    T0 = 288.15  
+    P0 = 101325  
+    R = 287.05   
+
+    P = P0 * (1 - (0.0065 * altitude) / T0) ** (9.81 / (0.0065 * R))
+
+    T = temperature + 273.15
+    rho = P / (R * T)
+    return rho
 
 
 def ukf_cda_step(
@@ -88,7 +100,7 @@ def ukf_cda_step(
     alpha, beta, kappa, eta_drive,
     innov_gate_W=2000.0,
     accel_minus_bias=True,
-    cdA_step_max=0.05,      # None to disable per-step CdA clamp
+    cdA_step_max=None,    
 ):
     n = 3
     lam = alpha**2 * (n + kappa) - n
@@ -97,18 +109,14 @@ def ukf_cda_step(
     Wm[0] = lam / (n + lam)
     Wc[0] = Wm[0] + (1 - alpha**2 + beta)
 
-    # ------------------------------------------------------------------
     #  prediction
-    # ------------------------------------------------------------------
     sigmas = sigma_points(x, P, lam)
     sig_f  = np.array([f_process(s, accel_meas, dt, accel_minus_bias) for s in sigmas])
 
-    Q_eff  = Q * dt                          # noise spectral density → discrete
+    Q_eff  = Q * dt                        
     x_pred, P_pred = transform_unscented(sig_f, Wm, Wc, Q_eff)
 
-    # ------------------------------------------------------------------
     #  measurement
-    # ------------------------------------------------------------------
     sig_h = np.zeros((2 * n + 1, 1))
     for i, s in enumerate(sig_f):
         sig_h[i, 0] = h_measure(
@@ -131,19 +139,8 @@ def ukf_cda_step(
         K     = Pxy / Pyy
         x_new = x_pred + K.flatten() * innov
         P_new = P_pred - K @ K.T * Pyy
-    else:                            # outlier → skip update
+    else:                          
         x_new, P_new = x_pred, P_pred
-
-    # ------------------------------------------------------------------
-    #  post-processing / clamps
-    # ------------------------------------------------------------------
-    # per-step CdA rate limiter (optional)
-    if cdA_step_max is not None:
-        x_new[1] = np.clip(
-            x_new[1],
-            x_pred[1] - cdA_step_max,
-            x_pred[1] + cdA_step_max
-        )
 
     # absolute physical bounds
     x_new[0] = np.clip(x_new[0], 0.0, 30.0)     # v
@@ -152,12 +149,13 @@ def ukf_cda_step(
 
     # ensure P stays symmetric / PSD
     P_new = 0.5 * (P_new + P_new.T)
+    
 
     return x_new, P_new, y_pred.item()
 
 
 if __name__ == "__main__":
-    log_number_str = "006"
+    log_number_str = "001"
     test_date      = "06_01_2025"
     stop_distance  = 805     
 
@@ -167,26 +165,25 @@ if __name__ == "__main__":
 
     #  constants & UKF settings
     mass      = 81.5
-    rho_air   = 1.20
-    Crr       = 0.003
-    eta_drive = 1.0        # keep as 1.0 unless you also change noise scaling
+    Crr       = 0.004
+    eta_drive = 0.97        
 
     alpha = 1e-3
     beta  = 2.0
     kappa = 0.0
 
     Q = np.diag([
-        0.2**2,           # v   (spectral density: m²/s³)
-        0.1**2,           # CdA (m⁴/s)
-        0.1**2            # bias (m²/s⁴)
+        0.5**2,           # v 
+        0.001**2,           # CdA
+        0.5**2            # bias
     ])
 
-    R_crank = 100.0
+    R_crank = 900 
 
     #  initial state
     v0 = float(df["velocity (m/s)"].iloc[0])
-    x  = np.array([v0, 0.3, 0.1])
-    P  = np.diag([0.01, 0.01, 0.01])
+    x = np.array([v0, 0.0, 0.0])   
+    P = np.diag([0.1**2, 0.01**2, 0.2**2])
 
     #  run UKF
     times, v_est, CdA_est, bias_est, power_pred_buf = [], [], [], [], []
@@ -200,6 +197,10 @@ if __name__ == "__main__":
         power_meas_crank = df["power (W)"].iloc[k]
         wind_speed       = df["wind_speed (m/s)"].iloc[k]
         slope_rad        = df["gradient (rad)"].iloc[k]
+        rho_air          = rho_calculator(
+            df["temperature (C)"].iloc[k],
+            df["altitude (m)"].iloc[k]
+        )
 
         x, P, P_crank_pred = ukf_cda_step(
             x, P,
@@ -209,7 +210,10 @@ if __name__ == "__main__":
             alpha, beta, kappa,
             eta_drive=eta_drive
         )
-
+        if k % 100 == 0:
+            print(f"t={times[-1]}  v_err={v_est[-1]-df['velocity (m/s)'].iloc[k]:.2f}  "
+                f"CdA={x[1]:.3f}  bias={x[2]:.2f}"
+                f"  acceleration={accel_meas:.2f}  ")
         times.append(df["time"].iloc[k])
         v_est.append(x[0])
         CdA_est.append(x[1])
@@ -229,7 +233,7 @@ if __name__ == "__main__":
     plot_dir = "plot"
     os.makedirs(plot_dir, exist_ok=True)
 
-    fig, axs = plt.subplots(4, 1, figsize=(12, 14), sharex=True)
+    fig, axs = plt.subplots(5, 1, figsize=(12, 14), sharex=True)
 
     # speed
     axs[0].plot(df["time"].to_numpy(), df["velocity (m/s)"].to_numpy(), label="Measured Speed")
@@ -241,13 +245,15 @@ if __name__ == "__main__":
 
     # CdA
     axs[1].plot(np.array(times), np.array(CdA_est), color="purple")
+    axs[1].axhline(y=np.mean(CdA_est), color='orange', linestyle='--', label='Mean CdA')
     axs[1].set_ylabel("CdA (m²)")
     axs[1].set_title("UKF: Estimated $C_dA$")
     axs[1].grid(True)
 
     # bias
-    axs[2].plot(times, df["estimated_acceleration (m/s^2)"].iloc[1:].to_numpy(), 
+    axs[2].plot(times, df["acceleration_y_LOWPASS_filtered (m/s^2)"].iloc[1:].to_numpy(), 
                 label="Measured Acceleration", color="orange")
+    axs[2].plot(times, df["estimated_acceleration (m/s^2)"].iloc[1:].to_numpy(), label="Estimated accel", color="black")
     axs[2].plot(times, bias_est, label="Estimated Bias", color="green")
     axs[2].set_ylabel("m/s²")
     axs[2].set_title("UKF: Acceleration Bias Estimation")
@@ -263,6 +269,14 @@ if __name__ == "__main__":
     axs[3].set_title("UKF: Predicted Power vs Measured")
     axs[3].legend()
     axs[3].grid(True)
+
+    # airspeed
+    axs[4].plot(times, df["wind_speed (m/s)"].iloc[1:].to_numpy(), label="Wind Speed", color="cyan")
+    axs[4].set_xlabel("Time")
+    axs[4].set_ylabel("Wind Speed (m/s)")
+    axs[4].set_title("Wind Speed")
+    axs[4].legend()
+    axs[4].grid(True)
 
     plt.tight_layout()
     save_path = os.path.join(
