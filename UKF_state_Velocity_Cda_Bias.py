@@ -41,7 +41,7 @@ def sigma_points(x, P, lam, jitter=1e-8):
     n = x.size
     try:
         S = np.linalg.cholesky((n + lam) * P)
-    except np.linalg.LinAlgError:                # add tiny jitter if needed
+    except np.linalg.LinAlgError:            
         S = np.linalg.cholesky((n + lam) * (P + jitter * np.eye(n)))
     sigmas = np.zeros((2 * n + 1, n))
     sigmas[0] = x
@@ -126,7 +126,7 @@ def ukf_cda_step(
 
     y_pred, Pyy = transform_unscented(
         sig_h, Wm, Wc,
-        np.array([[(eta_drive**2) * R_crank]])   # keep η² term for generality
+        np.array([[(eta_drive**2) * R_crank]])   
     )
 
     diff_x = sig_f - x_pred          # (2n+1,3)
@@ -191,7 +191,7 @@ if __name__ == "__main__":
     for k in range(1, len(df)):
         dt = (df["time"].iat[k] - df["time"].iat[k - 1]).total_seconds()
         if dt <= 0:
-            continue                                # skip bad timestamp
+            continue                            
 
         accel_meas       = df["estimated_acceleration (m/s^2)"].iloc[k]
         power_meas_crank = df["power (W)"].iloc[k]
