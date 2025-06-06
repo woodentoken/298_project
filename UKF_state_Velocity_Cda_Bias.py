@@ -175,7 +175,7 @@ if __name__ == "__main__":
     Q = np.diag([
         0.5**2,           # v 
         0.001**2,           # CdA
-        0.5**2            # bias
+        1**2            # bias
     ])
 
     R_crank = 900 
