@@ -44,7 +44,6 @@ def upsampling_function(df_low, upsampling_freq):
 
     return df_upsampled
 
-    # Commented out the plotting part, uncomment if needed
 def process_garmin_data(log_number_str, test_date, stop_distance):
     """
     Process Garmin data from a CSV file and calculate gradient, fix the daylight saving time.
