@@ -117,7 +117,6 @@ def ukf_cda_step(
     alpha, beta, kappa, eta_drive,
     innov_gate_W=2000.0,
     accel_minus_bias=True,
-    cdA_step_max=None,    
 ):
     n = 3
     lam = alpha**2 * (n + kappa) - n
@@ -166,99 +165,148 @@ def ukf_cda_step(
 
     # ensure P stays symmetric / PSD
     P_new = 0.5 * (P_new + P_new.T)
-    
 
-    return x_new, P_new, y_pred.item
+    return x_new, P_new, y_pred.item()
 
-def build_objective(df, eta_drive, mass, Crr):
-    
-    # ρ calculator & ukf_cda_step must already be in scope
+def build_objective(
+    garmin_df,
+    acceleration_df,
+    wind_speed_df,
+    mass,
+    Crr,
+    eta_drive
+):
+    fast_len = len(acceleration_df)
+    slow_df  = garmin_df.merge(wind_speed_df, on="time", how="left")
+    slow_len = len(slow_df)
+    ratio    = fast_len // slow_len
+    DT       = 0.01
+
     def single_run(params):
-        alpha, beta, kappa, Q_v, Q_CdA, Q_bias, R_crank, x0_v, x0_CdA, x0_bias= params
-        Q  = np.diag([Q_v**2, Q_CdA**2, Q_bias**2])
-        x  = np.array([x0_v, x0_CdA, x0_bias])
-        # P  = np.diag([x0_v**2, x0_CdA**2, x0_bias**2]) 
-        P = np.diag([0.2**2, 0.05**2, 0.5**2])  # initial uncertainty
+        alpha, beta, kappa, Q_v, Q_CdA, Q_bias, R_crank, x0_CdA, x0_bias = params
 
-        v_est = []  # store velocity estimates
+        # build noise & initials
+        Q   = np.diag([Q_v**2, Q_CdA**2, Q_bias**2])
+        R   = R_crank
+        x   = np.array([float(acceleration_df["velocity (m/s)"].iat[0]), x0_CdA, x0_bias])
+        P   = np.diag([0.2**2, 0.05**2, 0.5**2])
 
-        try:
-            for k in range(1, len(df)):
-                dt = (df["time"].iat[k] - df["time"].iat[k-1]).total_seconds()
-                if dt <= 0:               # skip bad rows
-                    continue
+        v_est, v_true = [], []
 
-                accel_meas       = df["acceleration_y_LOWPASS_filtered (m/s^2)"].iat[k]
-                power_meas_crank = df["power (W)"].iat[k]
-                wind_speed       = df["wind_speed (m/s)"].iat[k]
-                slope_rad        = df["gradient (rad)"].iat[k]
-                
-                rho_air = rho_calculator(
-                    df["temperature (C)"].iat[k],
-                    df["altitude (m)"].iat[k]
-                )
-                
-                x, P, _ = ukf_cda_step(
-                    x, P,
-                    accel_meas, slope_rad, wind_speed, power_meas_crank,
-                    dt, mass, rho_air, Crr,
-                    Q, R_crank,
-                    alpha, beta, kappa,
-                    eta_drive=eta_drive
-                )
-                v_est.append(x[0])
+        for fast_idx in range(1, fast_len):
+            accel_meas = acceleration_df["acceleration_y_LOWPASS_filtered (m/s^2)"].iat[fast_idx]
 
-            v_true = df["velocity (m/s)"].iloc[1:len(v_est)+1]
-            rmse   = np.sqrt(mean_squared_error(v_true, v_est))
-            print(f"RMSE: {rmse:.4f}  Params: {params}")
-            return rmse
+            # 100 Hz predict
+            x, P = ukf_prediction(x, P, accel_meas, Q, DT, alpha, beta, kappa)
 
-        except Exception:
-            return 1e6 
+            if fast_idx % ratio == 0:
+                slow_idx = fast_idx // ratio
+                if slow_idx < slow_len:
+                    row = slow_df.iloc[slow_idx]
+                    x, P, _ = ukf_prediction_measurement(
+                        x, P,
+                        accel_meas, DT, row,
+                        Q, R,
+                        mass, Crr, eta_drive,
+                        alpha, beta, kappa
+                    )
+                    v_est.append(x[0])
+                    v_true.append(slow_df["velocity (m/s)"].iat[slow_idx])
+                    
+
+        if not v_est:
+            return 1e6
+        return np.sqrt(mean_squared_error(v_true, v_est))
+    
 
     @use_named_args(search_space)
-    def objective(**named_params):
-        ordered = [named_params[var.name] for var in search_space]
-        return single_run(ordered)
-    
+    def objective(**kwargs):
+        # preserve the order of search_space
+        params = [kwargs[d.name] for d in search_space]
+        return single_run(params)
+
     return objective
 
-def optimise_ukf(df, n_calls, random_state, mass, Crr, eta_drive):
-    """Runs Bayesian optimisation and returns the result object & tidy DF."""
-    
-    objective = build_objective(df, eta_drive, mass, Crr)
-    
-    result = gp_minimize(
-        func           = objective,
-        dimensions     = search_space,
-        n_calls        = n_calls,       # total evaluations
-        n_initial_points = 15,          # random starts
-        acq_func       = "EI",          # expected-improvement
-        random_state   = random_state,
-        verbose        = True
+
+def optimise_ukf(
+    garmin_df,
+    acceleration_df,
+    wind_speed_df,
+    n_calls,
+    random_state,
+    mass,
+    Crr,
+    eta_drive
+):
+    obj = build_objective(
+        garmin_df, acceleration_df, wind_speed_df,
+        mass, Crr, eta_drive
     )
-    
-    # pretty summary
-    res_df = pd.DataFrame(result.x_iters, columns=[d.name for d in search_space])
-    res_df["rmse_velocity"] = result.func_vals
-    res_df.sort_values("rmse_velocity", inplace=True)
-    
-    print("\nBest configuration:")
-    print(res_df.iloc[0])
-    
-    return result, res_df
+
+    result = gp_minimize(
+        func              = obj,
+        dimensions        = search_space,
+        n_calls           = n_calls,
+        n_initial_points  = min(15, n_calls//3),
+        acq_func          = "EI",
+        random_state      = random_state,
+        verbose           = True
+    )
+
+    trials = pd.DataFrame(result.x_iters, columns=[d.name for d in search_space])
+    trials["rmse_velocity"] = result.func_vals
+    trials.sort_values("rmse_velocity", inplace=True)
+
+    print("Best configuration:\n", trials.iloc[0])
+    return result, trials
+
+def ukf_prediction(x, P, accel_meas, Q, dt, alpha, beta, kappa):
+    x_pred, P_pred, _ = ukf_cda_step(
+        x, P,
+        accel_meas,
+        slope_rad=0.0, wind_speed=0.0, power_meas_crank=0.0,
+        dt=dt, mass=0.0, rho_air=1.225, Crr=0.0,
+        Q=Q, R_crank=0.0,
+        alpha=alpha, beta=beta, kappa=kappa,
+        eta_drive=1.0,
+        innov_gate_W=-1.0
+    )
+    return x_pred, P_pred
+
+def ukf_prediction_measurement(x, P, accel_meas, dt, slow_row,
+                               Q, R_crank, mass, Crr, eta_drive,
+                               alpha, beta, kappa):
+    slope_rad  = slow_row["gradient (rad)"]
+    wind_speed = slow_row["wind_speed (m/s)"]
+    power_meas = slow_row["power (W)"]
+    rho_air    = rho_calculator(slow_row["temperature (C)"], slow_row["altitude (m)"])
+    x_upd, P_upd, P_pred = ukf_cda_step(
+        x, P,
+        accel_meas, slope_rad, wind_speed, power_meas,
+        dt, mass, rho_air, Crr,
+        Q, R_crank,
+        alpha, beta, kappa,
+        eta_drive
+    )
+    return x_upd, P_upd, P_pred
 
 
 if __name__ == "__main__":
-    log_number_str = "005"
+    log_number_str = "003"
     test_date      = "06_01_2025"
     stop_distance  = 805     
 
     #  load data
     upsampled_df, garmin_df, acceleration_df, wind_speed_df = load_processed_df(log_number_str, test_date, stop_distance)
+    slow_df = garmin_df.merge(wind_speed_df, on="time", how="left")
+    fast_df = acceleration_df.copy()
 
+    # constants 
+    mass = 81.5       # kg
+    Crr  = 0.004      # rolling resistance coefficient
+    eta_drive = 0.97  # drivetrain efficiency
 
-    v0 = float(df["velocity (m/s)"].iloc[0])
+    v0 = float(garmin_df["velocity (m/s)"].iloc[0])
     search_space = [
         Real(1e-4, 0.1,   name="alpha",   prior="log-uniform"),    # spread
         Real(1.99,  2.01,    name="beta"),                         # keep ~2
@@ -266,22 +314,19 @@ if __name__ == "__main__":
         Real(0.3,  1.0,    name="Q_v"),                            # Q_v  (m s⁻¹)
         Real(0.01, 0.3,    name="Q_CdA"),                          # Q_CdA
         Real(0.1,  1.5,    name="Q_bias"),                         # Q_bias
-        Real(15.0, 900.0,  name="R_crank"),                        # crank-P 
-        Real(v0 - 0.01, v0 + 0.01,   name="x0_v"),                 # initial v
+        Real(15.0, 1000.0,  name="R_crank"),                       # crank-P 
         Real(0.1,  0.6,    name="x0_CdA"),                         # initial CdA
         Real(0, 2.0,    name="x0_bias")                            # initial bias
     ]
 
-    #  constants & UKF settings
-    mass      = 81.5
-    Crr       = 0.0037
-    eta_drive = 0.98      
-
+    n_iterations = 200
     random_state = 1  # for reproducibility
 
-    n_iterations = 300
-    res_opt, df_trials = optimise_ukf(df, n_iterations, random_state, mass, Crr, eta_drive)
-    # Svave the optimisation results
+    # run optimisation
+    result, df_trials = optimise_ukf(
+        garmin_df, acceleration_df, wind_speed_df, n_calls=n_iterations, random_state=random_state,
+        mass=mass, Crr=Crr, eta_drive=eta_drive)
+    
     output_folder = "Optimisation_results"
     os.makedirs(output_folder, exist_ok=True)
     output_file = os.path.join(output_folder, f"optimisation_results_{log_number_str}_{test_date}_{stop_distance}m.csv")
@@ -289,141 +334,138 @@ if __name__ == "__main__":
 
     print(f'Best parameters found:')
     print(df_trials.head(1))
+    
+    ALPHA = df_trials["alpha"].iloc[0]
+    BETA  = df_trials["beta"].iloc[0]
+    KAPPA = df_trials["kappa"].iloc[0]
 
-
-    alpha = df_trials["alpha"].iloc[0]
-    beta  = df_trials["beta"].iloc[0]
-    kappa = df_trials["kappa"].iloc[0]
-
-    Q = np.diag([
-        df_trials["Q_v"].iloc[0]**2,
-        df_trials["Q_CdA"].iloc[0]**2,
-        df_trials["Q_bias"].iloc[0]**2
-    ])
-
+    Q = np.diag([df_trials["Q_v"].iloc[0]**2,
+                 df_trials["Q_CdA"].iloc[0]**2,
+                df_trials["Q_bias"].iloc[0]**2])
     R_crank = df_trials["R_crank"].iloc[0]
 
-    #  initial state
-    x = np.array([v0, df_trials["x0_CdA"].iloc[0], df_trials["x0_bias"].iloc[0]])
-    P = np.diag([df_trials["x0_v"].iloc[0]**2,
-                 df_trials["x0_CdA"].iloc[0]**2,
-                 df_trials["x0_bias"].iloc[0]**2])
-    
-    #  run UKF
-    times, v_est, CdA_est, bias_est, power_pred_buf = [], [], [], [], []
+    # constants
+    fast_len = len(acceleration_df)
+    slow_len = len(slow_df)
+    ratio    = fast_len // slow_len   
 
-    for k in range(1, len(df)):
-        dt = (df["time"].iat[k] - df["time"].iat[k - 1]).total_seconds()
-        if dt <= 0:
-            continue                            
+    DT        = 0.01   
 
-        accel_meas       = df["acceleration_y_LOWPASS_filtered (m/s^2)"].iloc[k]
-        power_meas_crank = df["power (W)"].iloc[k]
-        wind_speed       = df["wind_speed (m/s)"].iloc[k]
-        slope_rad        = df["gradient (rad)"].iloc[k]
-        rho_air          = rho_calculator(
-            df["temperature (C)"].iloc[k],
-            df["altitude (m)"].iloc[k]
-        )
+    # initial state
+    v0 = float(garmin_df["velocity (m/s)"].iat[0])
+    x  = np.array([v0, df_trials["x0_CdA"].iloc[0], df_trials["x0_bias"].iloc[0]])
+    # initial covariance
+    P  = np.diag([0.2**2, 0.05**2, 0.5**2])
 
-        x, P, P_crank_pred = ukf_cda_step(
+    fast_times, v_est, CdA_est, bias_est = [], [], [], []
+    slow_times, power_pred_buf            = [], []
+
+    for fast_index, fast_time in enumerate(fast_df["time"]):
+        if fast_index == 0:
+            continue
+
+        accel_meas = fast_df["acceleration_y_LOWPASS_filtered (m/s^2)"].iat[fast_index]
+
+        # 100 Hz prediction step
+        x, P = ukf_prediction(
             x, P,
-            accel_meas, slope_rad, wind_speed, power_meas_crank,
-            dt, mass, rho_air, Crr,
-            Q, R_crank,
-            alpha, beta, kappa,
-            eta_drive=eta_drive
+            accel_meas,
+            Q,
+            DT,       # e.g. 0.01
+            ALPHA,
+            BETA,
+            KAPPA
         )
-        if k % 100 == 0:
-            print(f"t={times[-1]}  v_err={v_est[-1]-df['velocity (m/s)'].iloc[k]:.2f}  "
-                f"CdA={x[1]:.3f}  bias={x[2]:.2f}"
-                f"  acceleration={accel_meas:.2f}  ")
-        times.append(df["time"].iloc[k])
+
+        # Every ratio step, do 1 Hz update
+        if fast_index % ratio == 0:
+            slow_index = fast_index // ratio
+            if slow_index < slow_len:
+                row = slow_df.iloc[slow_index]
+
+                x, P, P_crank_pred = ukf_prediction_measurement(
+                    x, P,
+                    accel_meas,
+                    DT,
+                    row,
+                    Q,
+                    R_crank,
+                    mass,
+                    Crr,
+                    eta_drive,
+                    ALPHA,
+                    BETA,
+                    KAPPA
+                )
+
+                slow_times.append(fast_time)
+                power_pred_buf.append(P_crank_pred)
+
+        fast_times.append(fast_time)
         v_est.append(x[0])
         CdA_est.append(x[1])
         bias_est.append(x[2])
-        power_pred_buf.append(P_crank_pred)
 
-    df_est = pd.DataFrame({
-        "time":       times,
+    # build DataFrames
+    fast_estimate_df = pd.DataFrame({
+        "time":       fast_times,
         "v_est":      v_est,
         "CdA_est":    CdA_est,
         "accel_bias": bias_est,
+    })
+
+    slow_estimate_df = pd.DataFrame({
+        "time":       slow_times,
         "power_pred": power_pred_buf,
     })
-    
-    df_slice = df.iloc[1 : len(v_est) + 1].reset_index(drop=True)
 
-    # append raw-sensor columns
-    df_est["velocity (m/s)"]                          = df_slice["velocity (m/s)"]
-    df_est["acceleration_y_LOWPASS_filtered (m/s^2)"] = df_slice["acceleration_y_LOWPASS_filtered (m/s^2)"]
-    df_est["gradient (rad)"]                          = df_slice["gradient (rad)"]
-    df_est["wind_speed (m/s)"]                        = df_slice["wind_speed (m/s)"]
-    df_est["temperature (C)"]                         = df_slice["temperature (C)"]
-    df_est["altitude (m)"]                            = df_slice["altitude (m)"]
-    df_est["power (W)"]                               = df_slice["power (W)"]
+    # Ensure time columns are sorted and in datetime
+    fast_estimate_df["time"] = pd.to_datetime(fast_estimate_df["time"])
+    slow_estimate_df["time"] = pd.to_datetime(slow_estimate_df["time"])
+    fast_estimate_df = fast_estimate_df.sort_values("time").reset_index(drop=True)
+    slow_estimate_df = slow_estimate_df.sort_values("time").reset_index(drop=True)
 
+    # Merge asof:
+    merged_df = pd.merge_asof(
+        fast_estimate_df,
+        slow_estimate_df,
+        on="time",
+        direction="forward"
+    )
+
+
+    # Add measured acceleration from acceleration_df (already at fast rate)
+    merged_df["acceleration_measured"] = acceleration_df["acceleration_y_LOWPASS_filtered (m/s^2)"].values[:len(merged_df)]
+
+    # Add measured velocity from garmin_df (slow rate, forward-fill to fast rate)
+    garmin_df_sorted = garmin_df.sort_values("time").reset_index(drop=True)
+    # Ensure both DataFrames have 'time' as datetime64 dtype
+    merged_df["time"] = pd.to_datetime(merged_df["time"])
+    garmin_df_sorted["time"] = pd.to_datetime(garmin_df_sorted["time"])
+    merged_df = pd.merge_asof(
+        merged_df,
+        garmin_df_sorted[["time", "velocity (m/s)", "power (W)"]],
+        on="time"
+    )
+    merged_df.rename(columns={"velocity (m/s)": "velocity_measured", "power (W)": "power_measured"}, inplace=True)
+
+    # fix the NaN with next value in power_pred
+    merged_df["power_pred"] = merged_df["power_pred"].ffill()
+
+    # Drop rows with any NaN values
+    merged_df = merged_df.dropna()
+
+    # check NahN values
+    if merged_df.isnull().values.any():
+        print("Warning: NaN values found in merged DataFrame.")
+
+    print(merged_df)
+
+    # Save the merged DataFrame
     output_results_folder = "UKF_estimated_results"
     os.makedirs(output_results_folder, exist_ok=True)
 
     out_fname = (f"ukf_estimated_results_{log_number_str}_"
                 f"{test_date}_{stop_distance}m.csv")
-    df_est.to_csv(os.path.join(output_results_folder, out_fname), index=False)
+    merged_df.to_csv(os.path.join(output_results_folder, out_fname), index=False)
     print(f"UKF results saved to {out_fname}")
-
-    # #  plotting
-    # plot_dir = "plot"
-    # os.makedirs(plot_dir, exist_ok=True)
-
-    # fig, axs = plt.subplots(5, 1, figsize=(12, 14), sharex=True)
-
-    # # speed
-    # axs[0].plot(df["time"].to_numpy(), df["velocity (m/s)"].to_numpy(), label="Measured Speed")
-    # axs[0].plot(np.array(times), np.array(v_est), label="UKF Speed", color="red")
-    # axs[0].set_ylabel("Velocity (m/s)")
-    # axs[0].set_title("UKF: Estimated Velocity vs Measured")
-    # axs[0].legend()
-    # axs[0].grid(True)
-
-    # # CdA
-    # axs[1].plot(np.array(times), np.array(CdA_est), color="purple")
-    # axs[1].axhline(y=np.mean(CdA_est), color='orange', linestyle='--', label='Mean CdA')
-    # axs[1].set_ylabel("CdA (m²)")
-    # axs[1].set_title("UKF: Estimated $C_dA$")
-    # axs[1].grid(True)
-
-    # # bias
-    # axs[2].plot(times, df["acceleration_y_LOWPASS_filtered (m/s^2)"].iloc[1:].to_numpy(), 
-    #             label="Measured Acceleration", color="orange")
-    # axs[2].plot(times, df["estimated_acceleration (m/s^2)"].iloc[1:].to_numpy(), label="Estimated accel", color="black")
-    # axs[2].plot(times, bias_est, label="Estimated Bias", color="green")
-    # axs[2].set_ylabel("m/s²")
-    # axs[2].set_title("UKF: Acceleration Bias Estimation")
-    # axs[2].legend()
-    # axs[2].grid(True)
-
-    # # power
-    # axs[3].plot(times, df["power (W)"].iloc[1:].to_numpy(), label="Measured Power",
-    #             color="blue")
-    # # axs[3].plot(times, np.array(power_pred_buf), label="Predicted Power", color="orange")
-    # axs[3].set_xlabel("Time")
-    # axs[3].set_ylabel("Power (W)")
-    # axs[3].set_title("UKF: Predicted Power vs Measured")
-    # axs[3].legend()
-    # axs[3].grid(True)
-
-    # # airspeed
-    # axs[4].plot(times, df["wind_speed (m/s)"].iloc[1:].to_numpy(), label="Wind Speed", color="cyan")
-    # axs[4].set_xlabel("Time")
-    # axs[4].set_ylabel("Wind Speed (m/s)")
-    # axs[4].set_title("Wind Speed")
-    # axs[4].legend()
-    # axs[4].grid(True)
-
-    # plt.tight_layout()
-    # save_path = os.path.join(
-    #     plot_dir, f"ukf_results_{log_number_str}_{test_date}_{stop_distance}m.png"
-    # )
-    # plt.savefig(save_path)
-    # plt.close(fig)
-    # print(f"Plot saved to {save_path}")

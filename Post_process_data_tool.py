@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from scipy.signal import butter, filtfilt
 import os
 
-def butter_lowpass_filter(data, cutoff=0.75, fs=100.0, order=3):
+def butter_lowpass_filter(data, cutoff=1, fs=100.0, order=3):
     nyq = 0.5 * fs
     normal_cutoff = cutoff / nyq
     b, a = butter(order, normal_cutoff, btype='low', analog=False)
