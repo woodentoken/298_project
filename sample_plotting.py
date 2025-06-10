@@ -26,7 +26,7 @@ def plot_velocities_and_power():
     combination = product(META_FILTER["meta_speed_mph"], META_FILTER["meta_stance"], META_FILTER["meta_direction"])
 
     for speed, stance, direction in combination:
-        figure, axes = plt.subplots(nrows=3, ncols=1, figsize=(14, 12))
+        figure, axes = plt.subplots(nrows=3, ncols=1, figsize=(14, 8))
         subdata = data.filter(
             pl.col("meta_direction") == direction, pl.col("meta_speed_mph") == speed, pl.col("meta_stance") == stance
         )
@@ -53,9 +53,9 @@ def plot_velocities_and_power():
         axes[0].plot(
             time,
             subdata["Speed"].to_numpy(),
-            label=f"Iphone Velocity",
+            label=f"iPhone Velocity",
             linestyle="--",
-            color="gray",
+            color="cyan",
         )
         axes[0].plot(
             time,
@@ -63,6 +63,7 @@ def plot_velocities_and_power():
             label=f"Open Loop Velocity",
             linewidth=2,
             color="magenta",
+            linestyle="--",
         )
 
         # acceleration plot

@@ -15,8 +15,10 @@ CRR = 0.005
 G = 9.80665  # m/s², acceleration due to gravity
 Q = np.diag([50, 0.5, 0.3])
 QU = np.diag([15])  # Process noise for input (acceleration)
-R = np.diag([10000])
+R = np.diag([100000])
 USE_DERIVED_ACCELERATION = False  # Set to True to use derived acceleration, False to use measured acceleration
+
+HOLDER = pd.DataFrame(columns=["Aero", "Grav", "Roll", "Inertia"], index=[0])  # Placeholder for global data holder
 
 def main():
     if USE_DERIVED_ACCELERATION:
@@ -148,6 +150,12 @@ def plot_power_constituents(df):
         F_inertia = MASS * df["Y (m/s^2)"]
         accel_source = "measured"
 
+    # HOLDER["F_aero"].append(F_aero)
+    # HOLDER["F_grav"].append(F_grav)
+    # HOLDER["F_roll"].append(F_roll)
+    # HOLDER["F_inertia"].append(F_inertia)
+    # HOLDER["v_meas"].append(v_meas)
+
     Total = F_aero + F_grav + F_roll + F_inertia
     Power = v_meas * Total
 
@@ -159,6 +167,7 @@ def plot_power_constituents(df):
     axes[0].plot(df["time"], Total, label="Total Force (predicted)", color="black", linewidth=2)
     axes[0].set_title("Forces Acting on the Bicycle")
     axes[0].set_ylabel("Force (N)")
+    axes[0].set_ylim(-15, 35)
 
     axes[1].plot(df["time"], Power, label="Power (predicted)", color="black", linewidth=2)
     axes[1].plot(df["time"], df["power"], label="Measured Power", linestyle="--", color="black", linewidth=2)
@@ -222,8 +231,13 @@ def ekf_cda_step(slope_rad, wind_speed, dt, states, variance, input, output, v_m
     F_grav = MASS * G * np.sin(slope_rad)
     F_roll = MASS * G * CRR * np.cos(slope_rad)
 
+    # ipdb.set_trace()  # Debugging point to inspect variables
+
     power_pred_true = (v_meas) * (F_aero + F_roll + F_grav + MASS * input)
     power_pred_est = (states[0]) * (F_aero + F_roll + F_grav + MASS * input)
+
+    # ipdb.set_trace()  # Debugging point to inspect variables
+    HOLDER.loc[step-1] = {"Aero": F_aero, "Grav": F_grav, "Roll": F_roll, "Inertia": MASS * input}
 
     # Measurement Jacobian H = dh/dx  (1×3)
     dh_dv = F_aero + F_grav + F_roll + MASS * input
@@ -262,7 +276,7 @@ def plotting(df, ekf_df):
         accel_color = "red"
 
     # plt.figure(figsize=(10, 4))
-    axes[0].plot(t, df["enhanced_speed"], label="Actual Speed")
+    axes[0].plot(t, df["enhanced_speed"], label="Actual Speed", color="black")
     axes[0].plot(t, ekf_df["v_est"], label=f"EKF Speed ({accel_source} acceleration)", color=accel_color)
     # axes[0].plot(np.array(t), ol_velocity, label="Bias Speed", color="red")
     axes[0].set_title("Velocity: EKF vs Measured")
@@ -270,21 +284,21 @@ def plotting(df, ekf_df):
 
     # Plot acceleration input
     # axes[1].plot(t, df["Y (m/s^2)"], label="Measured Acceleration", color="red")
-    axes[1].plot(t, df["derived_acceleration"], label="Derived Acceleration", color="magenta")
-    axes[1].plot(t, ekf_df["accel_bias"], label="Estimated Bias", color="green")
+    axes[1].plot(t, df["derived_acceleration"], label="Derived Acceleration", color="black")
+    axes[1].plot(t, ekf_df["accel_bias"], label="Estimated Bias", color="magenta")
     axes[1].set_title("Acceleration Bias Estimation")
     axes[1].grid()
 
     # axes[2].plot(t, df["CdA_est"], label="Estimated CdA", color="magenta")
-    axes[2].plot(t, ekf_df["CdA_est"], label="Estimated CdA", color="green")
+    axes[2].plot(t, ekf_df["CdA_est"], label="Estimated CdA", color="magenta")
     axes[2].set_title("CdA Estimation")
     axes[2].grid()
 
     # Plot residual
-    axes[3].plot(t, ekf_df["power_pred_true"], label="Power (using measured velocity)", color="black")
+    # axes[3].plot(t, ekf_df["power_pred_true"], label="Power (using measured velocity)", color="black")
     axes[3].plot(t, ekf_df["power_pred_est"], label="Estimated power (EKF)", color="red")
     axes[3].plot(t, df["power"], label="Power meter measurement", color="blue")
-    axes[3].set_title("Residuals (y - h(x))")
+    axes[3].set_title("Power Estimation vs Measured")
     axes[3].set_xlabel("Time (s)")
     axes[3].grid()
 
@@ -298,3 +312,17 @@ def plotting(df, ekf_df):
 
 if __name__ == "__main__":
     main()
+    figure, ax = plt.subplots(figsize=(14, 3))
+    # ipdb.set_trace()  # Debugging point to inspect variables
+    ax.plot(HOLDER["Aero"], label="Aero Drag Force", color="#4c92c3", linewidth=4)
+    ax.plot(HOLDER["Grav"], label="Gravitational Force", color="#ff983e", linewidth=4)
+    ax.plot(HOLDER["Roll"], label="Rolling Resistance Force", color="#56b356", linewidth=4)
+    ax.plot(HOLDER["Inertia"], label="Inertial Force", color="#bc4331", linewidth=4)
+    # ax.plot(HOLDER["Aero"] + HOLDER["Grav"] + HOLDER["Roll"] + HOLDER["Inertia"], label="Total Force", color="black", linewidth=2)
+    ax.set_title("Force Components Over Time")
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("Force (N)")
+    ax.legend(loc="lower right")
+    plt.tight_layout()
+    plt.savefig("force_components_over_time.png", dpi=500)
+    # plt.show()
