@@ -1,5 +1,13 @@
 import pandas as pd
 from datetime import timedelta
+import numpy as np
+import matplotlib as mpl
+
+
+freq_space = np.linspace(0.4, 2, 6)[::-1]  # Define frequency space for the colormap
+cmap = mpl.colormaps["magma"]
+colors = cmap(freq_space / freq_space.max())  # Normalize to [0, 1] for colormap
+norm = mpl.colors.Normalize(vmin=freq_space.min(), vmax=freq_space.max())
 
 
 def test_case_generator(log_number_str, test_date, stop_distance):
