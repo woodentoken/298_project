@@ -3,14 +3,19 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import ipdb
 import scipy
+import matplotlib as mpl
+
+mpl.rcParams.update({"font.size": 16})  # Adjust the number as needed
+mpl.rcParams["lines.linewidth"] = 2  # Set default line width for all plots
 
 # Constants & tuning
 MASS = 82.6
 RHO = 1.20
 CRR = 0.005
 G = 9.80665  # m/s², acceleration due to gravity
-Q = np.diag([0.1, 0.1])
-R = np.diag([100000])
+Q = np.diag([50, 0.5, 0.3])
+QU = np.diag([15])  # Process noise for input (acceleration)
+R = np.diag([10000])
 USE_DERIVED_ACCELERATION = False  # Set to True to use derived acceleration, False to use measured acceleration
 
 def main():
@@ -24,13 +29,14 @@ def main():
     # Initial state
     length = len(df["time"])
 
-    x = np.ndarray((length, 2, 1))
-    P = np.ndarray((length, 2, 2))
+    x = np.ndarray((length, 3, 1))
+    P = np.ndarray((length, 3, 3))
 
     x[0, 0] = float(df["Speed"].iloc[0])  # initial velocity
-    x[0, 1] = 0.0  # initial bias
+    x[0, 1] = 0.0  # initial CdA (drag area)
+    x[0, 2] = 0.0  # initial bias
 
-    P[0, :, :] = np.diag([0.0, 0.0])  # initial covariance
+    P[0, :, :] = np.diag([10, 0.2, 0.3])  # initial covariance
 
     # Output
     residuals1 = np.ndarray((length))  # Initialize residuals
@@ -39,14 +45,17 @@ def main():
     residuals2 = np.ndarray((length))  # Initialize residuals
     residuals2[0] = 0.0  # Initial residual
 
+    residuals3 = np.ndarray((length))  # Initialize residuals
+    residuals3[0] = 0.0  # Initial residual
+
     power_pred_true = np.ndarray((length))  # Initialize residuals
     power_pred_true[0] = 0.0  # Initial residual
 
     power_pred_est = np.ndarray((length))  # Initialize residuals
     power_pred_est[0] = 0.0  # Initial residual
 
-    kalman_gains = np.ndarray((length, 2, 1))  # Initialize Kalman gains
-    kalman_gains[0, :, :] = np.array([[0.0], [0.0]])  # Initial Kalman gain
+    kalman_gains = np.ndarray((length, 3, 1))  # Initialize Kalman gains
+    kalman_gains[0, :, :] = np.array([[0.0], [0.0], [0.0]])  # Initial Kalman gain
 
     dt = df["time"].iloc[1] - df["time"].iloc[0]
     # Time step and measurements
@@ -85,8 +94,8 @@ def main():
         {
             "t": df["time"],
             "v_est": x[:, 0, 0],
-            # "CdA_est": x[:, 1, 0],
-            "accel_bias": x[:, 1, 0],
+            "CdA_est": x[:, 1, 0],
+            "accel_bias": x[:, 2, 0],
             "residuals_est": residuals2,
             "residuals_true": residuals1,
             "power_pred_true": power_pred_true,
@@ -142,34 +151,39 @@ def plot_power_constituents(df):
     Total = F_aero + F_grav + F_roll + F_inertia
     Power = v_meas * Total
 
-    figure, axes = plt.subplots(3, 1, figsize=(10, 12))
-    axes[0].plot(df["time"], F_aero, label="Aero Drag Force")
-    axes[0].plot(df["time"], F_grav, label="Gravitational Force")
-    axes[0].plot(df["time"], F_roll, label="Rolling Resistance Force")
-    axes[0].plot(df["time"], F_inertia, label=f"Inertial Force ({accel_source}) ")
-    axes[0].plot(df["time"], Total, label="Total Force (predicted)", color="black")
+    figure, axes = plt.subplots(2, 1, figsize=(14, 8))
+    axes[0].bar(df["time"], F_aero, label="Aero Drag Force", alpha=0.8)
+    axes[0].bar(df["time"], F_grav, bottom=F_aero, label="Gravitational Force", alpha=0.8)
+    axes[0].bar(df["time"], F_roll, bottom=F_aero+F_grav, label="Rolling Resistance Force", alpha=0.8)
+    axes[0].bar(df["time"], F_inertia, bottom=F_aero+F_grav+F_roll, label=f"Inertial Force ({accel_source})", alpha=0.8)
+    axes[0].plot(df["time"], Total, label="Total Force (predicted)", color="black", linewidth=2)
     axes[0].set_title("Forces Acting on the Bicycle")
     axes[0].set_ylabel("Force (N)")
-    axes[0].legend()
-    axes[0].grid()
 
-    axes[1].plot(df["time"], Power, label="Power (predicted)", color="black")
-    axes[1].plot(df["time"], df["power"], label="Measured Power (power meter)", linestyle="--", color="black")
+    axes[1].plot(df["time"], Power, label="Power (predicted)", color="black", linewidth=2)
+    axes[1].plot(df["time"], df["power"], label="Measured Power", linestyle="--", color="black", linewidth=2)
     axes[1].set_title("Power estimation from forces")
     axes[1].set_ylabel("Power (W)")
-    axes[1].legend()
-    axes[1].grid()
 
-    axes[2].plot(df["time"], df["Y (m/s^2)"], label="Acceleration")
-    axes[2].plot(
-        df["time"], df["enhanced_speed"].diff() / df["time"].diff(), label="Estimated Acceleration", linestyle="--"
-    )
-    axes[2].set_title("Acceleration Input")
-    axes[2].set_xlabel("Time (s)")
-    axes[2].set_ylabel("Acceleration (m/s²)")
-    axes[2].legend()
-    axes[2].grid()
-    plt.show()
+    axright = axes[1].twinx()
+
+    axright.plot(df["time"], df["Y (m/s^2)"], label="Acceleration", color="blue", linewidth=2)
+
+    axright.tick_params(axis='y', labelcolor='blue')
+    # axes[2].plot(
+    #     df["time"], df["enhanced_speed"].diff() / df["time"].diff(), label="Estimated Acceleration", linestyle="--"
+    # )
+    # axright.set_title("Acceleration Input")
+    axright.set_xlabel("Time (s)")
+    axright.set_ylabel("Acceleration (m/s²)")
+    axright.legend(loc="upper right", edgecolor="white")
+
+    for ax in axes:
+        ax.legend(loc="lower right", edgecolor="white")
+        ax.set_xlim(25, 50)
+
+    plt.tight_layout()
+    plt.savefig("power_constituents.png", dpi=500)
 
 
 # EKF one-step:
@@ -190,20 +204,21 @@ def ekf_cda_step(slope_rad, wind_speed, dt, states, variance, input, output, v_m
     CdA_pred = 0.5
 
     # PREDICTION
-    A_prime = np.array([[1.0, 1.0], [0.0, 1.0]])
-    B_prime = np.array([[dt], [0.0]])
+    A_prime = np.array([[1.0, 0.0, 1.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+    B_prime = np.array([[dt], [0.0], [0.0]])
     # noise is added linearly to both states
     E_prime = np.array(
         [
-            [1.0, 0.0],
-            [0.0, 1.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
         ]
     )
     x_pred = A_prime @ states + B_prime * input
     P_pred = A_prime @ variance @ A_prime.T + E_prime @ Q @ E_prime.T
 
     # MEASUREMENT UPDATE
-    F_aero = 0.5 * RHO * CdA_pred * wind_speed**2
+    F_aero = 0.5 * RHO * x_pred[1][-1] * wind_speed**2
     F_grav = MASS * G * np.sin(slope_rad)
     F_roll = MASS * G * CRR * np.cos(slope_rad)
 
@@ -212,13 +227,13 @@ def ekf_cda_step(slope_rad, wind_speed, dt, states, variance, input, output, v_m
 
     # Measurement Jacobian H = dh/dx  (1×3)
     dh_dv = F_aero + F_grav + F_roll + MASS * input
-    # dh_dCdA = 0.5 * rho * x_pred[0] * wind_speed**2
-    dh_dbias = MASS * x_pred[1][0]
-    dh_du = MASS * x_pred[0][0]
+    dh_dCdA = 0.5 * RHO * x_pred[0][-1] * wind_speed**2
+    dh_dbias = MASS * x_pred[2][-1]
+    dh_du = MASS * x_pred[0][-1]
 
     # linearize the measurement equation based on the state
-    C_prime = np.array([dh_dv, 0]).reshape(1, 2)  # 1×3 Jacobian matrix
-    D_prime = np.array([0.0])
+    C_prime = np.array([dh_dv, dh_dCdA, 0]).reshape(1, 3)  # 1×3 Jacobian matrix
+    D_prime = np.array([dh_du]).reshape(1, 1)  # 1×1 Jacobian matrix for input
     # noise is added in the measurement equation
     F_prime = np.array([1.0])
 
@@ -236,8 +251,7 @@ def ekf_cda_step(slope_rad, wind_speed, dt, states, variance, input, output, v_m
 
 def plotting(df, ekf_df):
     t = df["time"]
-    figure, axes = plt.subplots(3, 1, figsize=(10, 10))
-
+    figure, axes = plt.subplots(4, 1, figsize=(14, 12))
     if USE_DERIVED_ACCELERATION:
         print("Using derived acceleration for plotting.")
         accel_source = "derived"
@@ -251,7 +265,6 @@ def plotting(df, ekf_df):
     axes[0].plot(t, df["enhanced_speed"], label="Actual Speed")
     axes[0].plot(t, ekf_df["v_est"], label=f"EKF Speed ({accel_source} acceleration)", color=accel_color)
     # axes[0].plot(np.array(t), ol_velocity, label="Bias Speed", color="red")
-    axes[0].legend()
     axes[0].set_title("Velocity: EKF vs Measured")
     axes[0].grid()
 
@@ -259,19 +272,28 @@ def plotting(df, ekf_df):
     # axes[1].plot(t, df["Y (m/s^2)"], label="Measured Acceleration", color="red")
     axes[1].plot(t, df["derived_acceleration"], label="Derived Acceleration", color="magenta")
     axes[1].plot(t, ekf_df["accel_bias"], label="Estimated Bias", color="green")
-    axes[1].legend()
     axes[1].set_title("Acceleration Bias Estimation")
     axes[1].grid()
 
-    # Plot residual
-    axes[2].plot(t, ekf_df["power_pred_true"], label="Power (using measured velocity)", color="black")
-    axes[2].plot(t, ekf_df["power_pred_est"], label="Estimated power (EKF)", color="red")
-    axes[2].plot(t, df["power"], label="Power meter measurement", color="blue")
-    axes[2].legend()
-    axes[2].set_title("Residuals (y - h(x))")
-    axes[2].set_xlabel("Time (s)")
+    # axes[2].plot(t, df["CdA_est"], label="Estimated CdA", color="magenta")
+    axes[2].plot(t, ekf_df["CdA_est"], label="Estimated CdA", color="green")
+    axes[2].set_title("CdA Estimation")
     axes[2].grid()
-    plt.show()
+
+    # Plot residual
+    axes[3].plot(t, ekf_df["power_pred_true"], label="Power (using measured velocity)", color="black")
+    axes[3].plot(t, ekf_df["power_pred_est"], label="Estimated power (EKF)", color="red")
+    axes[3].plot(t, df["power"], label="Power meter measurement", color="blue")
+    axes[3].set_title("Residuals (y - h(x))")
+    axes[3].set_xlabel("Time (s)")
+    axes[3].grid()
+
+    for ax in axes:
+        ax.legend(loc="upper right")
+
+    plt.tight_layout()
+    plt.savefig("ekf_states_accel_basis_cda.png", dpi=500)
+    # plt.show()
 
 
 if __name__ == "__main__":

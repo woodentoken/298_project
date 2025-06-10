@@ -26,7 +26,7 @@ def plot_velocities_and_power():
     combination = product(META_FILTER["meta_speed_mph"], META_FILTER["meta_stance"], META_FILTER["meta_direction"])
 
     for speed, stance, direction in combination:
-        figure, axes = plt.subplots(nrows=3, ncols=1, figsize=(14, 8))
+        figure, axes = plt.subplots(nrows=3, ncols=1, figsize=(14, 12))
         subdata = data.filter(
             pl.col("meta_direction") == direction, pl.col("meta_speed_mph") == speed, pl.col("meta_stance") == stance
         )
