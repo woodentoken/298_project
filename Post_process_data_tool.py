@@ -32,10 +32,10 @@ def main():
             wind_speed_df = process_wind_speed_data(log_number_str, test_date, start_time, stop_time)
 
             # Upsample Garmin data to match acceleration data
-            garmin_df_upsampled = upsampling_function(garmin_df, 100)
+            # garmin_df_upsampled = upsampling_function(garmin_df, 100)
 
             # Upsample wind speed data to match acceleration data
-            wind_speed_df_upsampled = upsampling_function(wind_speed_df, 100)
+            # wind_speed_df_upsampled = upsampling_function(wind_speed_df, 100)
 
             # plt.figure(figsize=(12, 6))
             # plt.plot(garmin_df_upsampled['time'].to_numpy(), garmin_df_upsampled['velocity (m/s)'].to_numpy(), label='Velocity (m/s)', color='green')
@@ -58,18 +58,17 @@ def main():
 
 
             # Save the processed data to CSV files
-            if not os.path.exists(f"Processed_data/Test_{test_date}/{test_case_string}_{cutoff}"):
-                os.makedirs(f"Processed_data/Test_{test_date}/{test_case_string}_{cutoff}")
-            garmin_df.to_csv(f"Processed_data/Test_{test_date}/{test_case_string}_{cutoff}/Garmin_data.csv", index=False)
-            accel_df.to_csv(f"Processed_data/Test_{test_date}/{test_case_string}_{cutoff}/Acceleration_data.csv", index=False)
-            wind_speed_df.to_csv(f"Processed_data/Test_{test_date}/{test_case_string}_{cutoff}/Wind_speed_data.csv", index=False)
+            if not os.path.exists(f"Processed_data/Test_{test_date}/{test_case_string}"):
+                os.makedirs(f"Processed_data/Test_{test_date}/{test_case_string}")
+            garmin_df.to_csv(f"Processed_data/Test_{test_date}/{test_case_string}/Garmin_data.csv", index=False)
+            accel_df.to_csv(f"Processed_data/Test_{test_date}/{test_case_string}/Acceleration_data_{cutoff}.csv", index=False)
+            wind_speed_df.to_csv(f"Processed_data/Test_{test_date}/{test_case_string}/Wind_speed_data.csv", index=False)
 
-            combined_df = combine_upsampled_dataframes(garmin_df_upsampled, wind_speed_df_upsampled, accel_df)
-            combined_df.to_csv(f"Processed_data/Test_{test_date}/{test_case_string}_{cutoff}/Combined_upsampled_data.csv", index=True)
+            # combined_df = combine_upsampled_dataframes(garmin_df_upsampled, wind_speed_df_upsampled, accel_df)
+            # combined_df.to_csv(f"Processed_data/Test_{test_date}/{test_case_string}_{cutoff}/Combined_upsampled_data.csv", index=True)
 
             print(f"Processed data for LOG_{log_number_str} saved successfully.")
 
-    # import ipdb; ipdb.set_trace()
     plt.plot(accel_df['time'].to_numpy(), -accel_df['acceleration_y (m/s^2)'].to_numpy(), label='Estimated Acceleration (m/s²)', color="black", alpha=0.2, linewidth = 0.1, zorder=-100)
     plt.ylim([-1.5, 4.5])
     plt.axhline(0, color='black', linewidth=0.5, linestyle='--', alpha=0.5)
