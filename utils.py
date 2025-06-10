@@ -4,11 +4,18 @@ import numpy as np
 import matplotlib as mpl
 
 
-freq_space = np.linspace(0.4, 2, 6)[::-1]  # Define frequency space for the colormap
-cmap = mpl.colormaps["magma"]
-colors = cmap(freq_space / freq_space.max())  # Normalize to [0, 1] for colormap
-norm = mpl.colors.Normalize(vmin=freq_space.min(), vmax=freq_space.max())
+freq_space = np.linspace(0.25, 2, 20)[::-1]  # Define frequency space for the colormap
+# freq_space = np.array([2.0, 3.0, 4.0, 5.0])[::-1]  # Example frequency space in Hz
+# freq_space = np.array([0.25, 0.75, 2.0])[::-1]  # Example frequency space in Hz
 
+cmap = mpl.colormaps["magma"]
+
+if len(freq_space) < 2:
+    colors = "red"
+    norm = mpl.colors.Normalize(vmin=freq_space[0]-0.5, vmax=freq_space[0]+0.5)
+else:
+    colors = cmap(freq_space / freq_space.max())  # Normalize to [0, 1] for colormap
+    norm = mpl.colors.Normalize(vmin=freq_space.min(), vmax=freq_space.max())
 
 def test_case_generator(log_number_str, test_date, stop_distance):
     target_speed = "14_6MPH"

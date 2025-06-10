@@ -24,6 +24,9 @@ BETA = 2.3  # UKF beta parameter
 KAPPA = 1.0  # UKF kappa parameter
 INNOV_GATE_W = 1000  # innovation gate for power measurement in watts
 
+Q = np.diag([0.1, 0.5, 0.5])  # process noise covariance
+R = 5
+
 
 def sigma_points(x, P, lam, jitter=1e-8):
     """Generate 2n+1 sigma points for state x ~ N(x,P)."""
@@ -76,8 +79,6 @@ def ukf_prediction_measurement(
     P,
     accel_meas,
     slow_data,
-    Q,
-    R_crank,
     accel_minus_bias=True,
 ):
     power_measured = slow_data["power (W)"]
@@ -103,7 +104,7 @@ def ukf_prediction_measurement(
     for i, s in enumerate(sig_f):
         sig_h[i, 0] = h_measure(s, rho_air, MASS, slope_rad, wind_speed, accel_meas, CRR, ETA_DRIVE)[0]
 
-    y_pred, Pyy = transform_unscented(sig_h, Wm, Wc, np.array([[(ETA_DRIVE**2) * R_crank]]))
+    y_pred, Pyy = transform_unscented(sig_h, Wm, Wc, np.array([[(ETA_DRIVE**2) * R]]))
 
     diff_x = sig_f - x_pred  # (2n+1,3)
     diff_y = sig_h[:, 0] - y_pred  # (2n+1,)
@@ -133,7 +134,6 @@ def ukf_prediction(
     x,
     P,
     accel_meas,
-    Q,
     accel_minus_bias=True,
 ):
     n = 3
@@ -170,14 +170,11 @@ def estimate_signals(QR_ratio, meta):
     #  initial state
     v0 = float(fast_df["velocity (m/s)"].iloc[0])
     x = np.array([v0, 0.0, 0.0])
-    P = np.diag([0.01**2, 0.1**2, 3**2])
+    P = np.diag([0.01**2, 0.1**2, 1**2])
 
     #  run UKF
     if QR_ratio is not None:
-        Q = 1 * np.identity(3)
-        R = 90000
-
-        print(f"QR_ratio: {1 / R}")
+        print(f"QR_ratio: {round(1 / R, 3)}, cutoff: {cutoff}")
 
         fast_times, v_est, CdA_est, bias_est = [], [], [], []
         slow_times, power_pred_buf = [], []
@@ -197,7 +194,6 @@ def estimate_signals(QR_ratio, meta):
                     x,
                     P,
                     accel_meas,
-                    Q,
                 )
                 fast_times.append(fast_time)
                 v_est.append(x[0])
@@ -210,8 +206,6 @@ def estimate_signals(QR_ratio, meta):
                     P,
                     accel_meas,
                     slow_df.iloc[slow_index],
-                    Q,
-                    R,
                 )
                 fast_times.append(fast_time)
                 v_est.append(x[0])
@@ -244,61 +238,65 @@ def estimate_signals(QR_ratio, meta):
 
 #  plotting
 def measured_plotting(fast_df, slow_df, fig, axs):
-    fast_time = fast_df["time"]
-    slow_time = slow_df["time"]
+    fast_time = (fast_df["time"] - fast_df["time"].iloc[0]).dt.total_seconds()
+    slow_time = (slow_df["time"] - slow_df["time"].iloc[0]).dt.total_seconds()
 
     # speed
-    axs[0].plot(fast_time, fast_df["velocity (m/s)"].to_numpy(), label="Measured Speed", color="black", linewidth=5)
+    axs[0].plot(slow_time, slow_df["velocity (m/s)"], label="Measured Speed", color="black", linewidth=5)
     axs[0].set_ylabel("Velocity (m/s)")
-    axs[0].set_title("UKF: Estimated Velocity vs Measured")
+    axs[0].set_title("Estimated Velocity vs Measured")
     axs[0].set_ylim(0, 10)
-    axs[0].grid(True, axis='x', linestyle='--', color='gray', linewidth=0.7)
+    axs[0].grid(True, axis="x", color="gray", linewidth=0.7)
     # vertical grid lines for each 10 seconds
 
     # CdA
     axs[1].set_ylabel("CdA (m²)")
-    axs[1].set_title("UKF: Estimated $C_dA$")
-    axs[1].grid(True, axis='x', linestyle='--', color='gray', linewidth=0.7)
+    axs[1].set_title("Estimated $C_dA$")
+    axs[1].grid(True, axis="x", color="gray", linewidth=0.7)
 
-
-    # bias
-    axs[2].plot(
-        fast_time,
-        fast_df["acceleration_y_LOWPASS_filtered (m/s^2)"],
-        label="Measured Acceleration",
-        color="black",
-        linewidth=5,
-    )
     axs[2].set_ylabel("m/s²")
-    axs[2].set_title("UKF: Acceleration Bias Estimation")
+    axs[2].set_title("Estimated Acceleration Bias ")
     axs[2].set_ylim(0, 3)
-    axs[2].grid(True, axis='x', linestyle='--', color='gray', linewidth=0.7)
+    axs[2].grid(True, axis="x", color="gray", linewidth=0.7)
 
+    axs[3].plot(fast_time, -fast_df["acceleration_y (m/s^2)"], label="Acceleration", color="gray", linewidth=0.25, alpha=0.25)
+    axs[3].set_ylabel("m/s²")
+    axs[3].set_title("Filtered Acceleration")
+    axs[3].set_ylim(1.5, 2.5)
+    axs[3].grid(True, axis="x", color="gray", linewidth=0.7)
 
     # power
-    axs[3].plot(slow_time, slow_df["power (W)"], label="Measured Power", color="black", linewidth=5)
-    axs[3].set_ylabel("Power (W)")
-    axs[3].set_title("UKF: Predicted Power vs Measured")
-    axs[3].set_ylim(0, 500)
-    axs[3].grid(True, axis='x', linestyle='--', color='gray', linewidth=0.7)
+    axs[4].plot(slow_time, slow_df["power (W)"], label="Measured Power", color="black", linewidth=5)
+    axs[4].set_ylabel("Power (W)")
+    axs[4].set_title("Predicted Power vs Measured")
+    axs[4].set_ylim(-200, 600)
+    axs[4].grid(True, axis="x", color="gray", linewidth=0.7)
+    axs[4].set_xlabel("Time (s)")
 
 
 
-def estimated_plotting(fast_estimated_df, slow_estimated_df, fig, axs, color="black"):
-    fast_time = fast_estimated_df["time"]
-    slow_time = slow_estimated_df["time"]
+def estimated_plotting(fast_estimated_df, slow_estimated_df, fast_df, fig, axs, color="black"):
+    fast_time = (fast_estimated_df["time"] - fast_estimated_df["time"].iloc[0]).dt.total_seconds()
+    slow_time = (slow_estimated_df["time"] - slow_estimated_df["time"].iloc[0]).dt.total_seconds()
 
     # speed
     axs[0].plot(fast_time, fast_estimated_df["v_est"], color=color, linewidth=3)
 
     # CdA
     axs[1].plot(fast_time, fast_estimated_df["CdA_est"], color=color, linewidth=3)
+    axs[1].axhline(y=fast_estimated_df["CdA_est"].mean(), color=color, linestyle="--", linewidth=2)  # Example reference line
 
     # bias
     axs[2].plot(fast_time, fast_estimated_df["accel_bias"], color=color, linewidth=3)
+    axs[2].axhline(y=fast_df["acceleration_y_LOWPASS_filtered (m/s^2)"][1::].mean(), color=color, linestyle="--", linewidth=2)
+
+
+    # acceleration
+    axs[3].plot(fast_time, fast_df["acceleration_y_LOWPASS_filtered (m/s^2)"][1::], color=color, linewidth=3)
+    axs[3].axhline(y=fast_df["acceleration_y_LOWPASS_filtered (m/s^2)"][1::].mean(), color=color, linestyle="--", linewidth=2)
 
     # power
-    axs[3].plot(slow_time, slow_estimated_df["power_pred"], color=color, linewidth=3)
+    axs[4].plot(slow_time, slow_estimated_df["power_pred"], color=color, linewidth=3)
 
 
 def execute_ukf(log_number_str="001", test_date="06_01_2025", stop_distance=805):
@@ -309,13 +307,13 @@ def execute_ukf(log_number_str="001", test_date="06_01_2025", stop_distance=805)
 
     plot_dir = "plot"
     os.makedirs(plot_dir, exist_ok=True)
-    fig, axs = plt.subplots(4, 1, figsize=(12, 14), sharex=True)
+    fig, axs = plt.subplots(5, 1, figsize=(14, 14), sharex=True)
 
     # # calculate the estimated signals and plot them per QR ratio
     for num, freq in enumerate(freq_space):
         meta["cutoff"] = freq
-        _, _, fast_est_df, slow_est_df = estimate_signals(1, meta)
-        estimated_plotting(fast_est_df, slow_est_df, fig, axs, color=colors[num])
+        fast_df, _, fast_est_df, slow_est_df = estimate_signals(1, meta)
+        estimated_plotting(fast_est_df, slow_est_df, fast_df, fig, axs, color=colors[num])
 
     # calculate the measured signals alone and plot them
     fast_df, slow_data, _, _ = estimate_signals(None, meta)
@@ -327,7 +325,7 @@ def execute_ukf(log_number_str="001", test_date="06_01_2025", stop_distance=805)
     # finalize the plot and save it
     plt.tight_layout()
     # divider = make_axes_locatable(fig.gca())
-    # cax = divider.append_axes("right", size="4%", pad=0.05)
+    # cax = dividerq.append_axes("right", size="4%", pad=0.05)
     # plt.colorbar(mpl.cm.ScalarMappable(cmap=cmap, norm=norm), cax=cax, label="Cutoff Frequency (Hz)")
     # cax.set_yticks(freq_space)
     save_path = os.path.join(
@@ -336,6 +334,31 @@ def execute_ukf(log_number_str="001", test_date="06_01_2025", stop_distance=805)
     plt.savefig(save_path)
     plt.close(fig)
     print(f"Plot saved to {save_path}")
+
+    make_colorbar()  # Create and show the colorbar separately
+
+
+def make_colorbar():
+    # Create figure and a dummy axis (just to attach the colorbar)
+    cfig, ax = plt.subplots(figsize=(2.0, 14.0))  # Tall and skinny
+
+    # Hide the dummy axis (optional)
+    ax.axis("off")
+
+    # Use make_axes_locatable to append colorbar axis
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes("right", size=0.5, pad=0.0)  # fill whole space
+
+    # Create the colorbar
+    plt.colorbar(
+        mpl.cm.ScalarMappable(cmap=cmap, norm=norm), cax=cax, orientation="vertical", label="Cutoff Frequency (Hz)"
+    )
+
+    # Set y-ticks manually
+    cax.set_yticks(freq_space)
+
+    plt.tight_layout()
+    plt.savefig("colorbar.png", bbox_inches="tight")
 
 
 if __name__ == "__main__":

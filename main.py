@@ -1,8 +1,12 @@
+import warnings
+
+import matplotlib as mpl
+
 from data_processing import post_process_data
 from ukf_estimation import execute_ukf
-from utils import freq_space, cmap, colors, norm
+from utils import freq_space
 
-import warnings
+mpl.rcParams.update({"font.size": 16})  # Adjust the number as needed
 
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -16,7 +20,7 @@ if __name__ == "__main__":
     print(f"using frequency space: {freq_space}, edit utils.py to change it")
 
     # Post-process data
-    post_process_data(test_date, stop_distance)
+    # post_process_data(test_date, stop_distance)
 
     # run the UKF with the specified parameters
     # will use the frequency space and colormap defined above
