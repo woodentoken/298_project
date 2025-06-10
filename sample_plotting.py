@@ -1,10 +1,14 @@
-import polars as pl
-import numpy as np
-import matplotlib.pyplot as plt
-import ipdb
 from itertools import product
-import scipy.integrate
+
+import ipdb
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+import numpy as np
+import polars as pl
 import scipy
+import scipy.integrate
+
+mpl.rcParams.update({"font.size": 16})  # Adjust the number as needed
 
 # define which meta values to plot
 META_FILTER = {
@@ -22,7 +26,7 @@ def plot_velocities_and_power():
     combination = product(META_FILTER["meta_speed_mph"], META_FILTER["meta_stance"], META_FILTER["meta_direction"])
 
     for speed, stance, direction in combination:
-        figure, axes = plt.subplots(nrows=3, ncols=1, figsize=(10, 8))
+        figure, axes = plt.subplots(nrows=3, ncols=1, figsize=(14, 8))
         subdata = data.filter(
             pl.col("meta_direction") == direction, pl.col("meta_speed_mph") == speed, pl.col("meta_stance") == stance
         )
@@ -43,15 +47,15 @@ def plot_velocities_and_power():
             time,
             subdata["enhanced_speed"].to_numpy(),
             label=f"Garmin Velocity",
-            linewidth=2,
-            color="orange",
+            linewidth=3,
+            color="black",
         )
         axes[0].plot(
             time,
             subdata["Speed"].to_numpy(),
             label=f"Iphone Velocity",
             linestyle="--",
-            color="red",
+            color="gray",
         )
         axes[0].plot(
             time,
@@ -67,7 +71,8 @@ def plot_velocities_and_power():
             time,
             subdata["Y (m/s^2)"].to_numpy(),
             label=f"Y Acceleration",
-            color="orange",
+            color="gray",
+            alpha=0.5,
         )
 
         # power plot
@@ -79,7 +84,7 @@ def plot_velocities_and_power():
         )
 
         axes[0].set_ylabel("Velocity (m/s)")
-        axes[0].set_ylim(0, 50)
+        axes[0].set_ylim(0, 30)
         axes[0].legend(loc="upper right")
         axes[0].grid()
 
@@ -89,7 +94,7 @@ def plot_velocities_and_power():
 
         axes[2].set_xlabel("Time (s)")
         axes[2].set_ylabel("Power (W)")
-        axes[2].set_ylim(0, 500)
+        axes[2].set_ylim(0, 250)
         axes[2].legend(loc="upper right")
         axes[2].grid()
 
