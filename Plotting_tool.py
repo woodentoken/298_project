@@ -68,62 +68,86 @@ if __name__ == "__main__":
     rmse_power = np.sqrt(np.mean((df["power_measured"] - df["power_pred"]) ** 2))
     print(f"RMSE of Power: {rmse_power:.4f} W")
 
-    # # ──────────────────────────────────────────────────────────
-    # plot_dir = "plot"
-    # os.makedirs(plot_dir, exist_ok=True)
+    # ──────────────────────────────────────────────────────────
+    plot_dir = "plot"
+    os.makedirs(plot_dir, exist_ok=True)
 
-    # fig, axs = plt.subplots(4, 1, figsize=(12, 14), sharex=True)
+    fig, axs = plt.subplots(4, 1, figsize=(12, 14), sharex=True)
 
-    # idx = df.index.to_numpy()  # fast integer index
+    idx = df.index.to_numpy()  # fast integer index
 
-    # # Velocity
-    # axs[0].plot(idx, df["velocity_measured"].to_numpy(), label="Measured Velocity", color="black", linewidth=3)
-    # axs[0].plot(idx, df["v_est"].to_numpy(),             label="UKF Estimated Velocity", color="steelblue",  linewidth=3)
-    # axs[0].set_ylabel("Velocity (m/s)")
-    # axs[0].set_title("Estimated Velocity vs Measured")
-    # axs[0].legend()
-    # axs[0].grid(axis='x', which='both')
+    # Velocity
+    axs[0].plot(idx, df["velocity_measured"].to_numpy(), label="Measured Velocity", color="black", linewidth=3)
+    axs[0].plot(idx, df["v_est"].to_numpy(),             label="UKF Estimated Velocity", color="steelblue",  linewidth=3)
+    axs[0].set_ylabel("Velocity (m/s)")
+    axs[0].set_ylim(1, 8)
+    axs[0].set_title("Estimated Velocity vs Measured")
+    axs[0].legend()
+    axs[0].grid(axis='x', which='both')
 
-    # # CdA
-    # axs[1].plot(idx, df["CdA_est"].to_numpy(), color="steelblue", linewidth=3, label="Estimated CdA")
-    # axs[1].axhline(df["CdA_est"].mean(), color="crimson", linestyle="--", linewidth= 3, label="Mean CdA")
-    # axs[1].set_ylabel("CdA (M²)")
-    # axs[1].legend()
-    # axs[1].grid(axis='x', which='both')
+    # CdA
+    axs[1].plot(idx, df["CdA_est"].to_numpy(), color="steelblue", linewidth=3, label="Estimated CdA")
+    axs[1].axhline(df["CdA_est"].mean(), color="crimson", linestyle="--", linewidth= 3, label="Mean CdA")
+    axs[1].set_ylim(0, 0.6)
+    axs[1].annotate(
+        "Mean CdA:",
+        xy=(0.01, 0.45),
+        xycoords='axes fraction',
+        fontsize=10,
+        color="crimson",
+        ha='left',
+        va='top',
+    )
+    axs[1].annotate(
+        f"{mean_cda:.4f} m²",
+        xy=(0.01, 0.38),
+        xycoords='axes fraction',
+        fontsize=10,
+        color="crimson",
+        ha='left',
+        va='top',
+    )
+    axs[1].set_title("CdA Estimation")
+    axs[1].set_ylabel("CdA (M²)")
+    axs[1].legend()
+    axs[1].grid(axis='x', which='both')
 
-    # # Acceleration bias
-    # axs[2].plot(idx, df["accel_bias"].to_numpy(),            label="UKF Estimated Bias", color="steelblue", linewidth=3)
-    # axs[2].plot(idx, df["acceleration_measured"].to_numpy(), label="Measured Acceleration", color="black",  linewidth=3)
-    # axs[2].set_title("Acceleration Bias Estimation")
-    # axs[2].set_ylabel("m/s²")
-    # axs[2].legend()
-    # axs[2].grid(axis='x', which='both')
+    # Acceleration bias
+    axs[2].plot(idx, df["accel_bias"].to_numpy(),            label="UKF Estimated Bias", color="steelblue", linewidth=3)
+    axs[2].plot(idx, df["acceleration_measured"].to_numpy(), label="Measured Acceleration", color="black",  linewidth=3)
+    axs[2].set_ylim(0, 3)
+    axs[2].set_title("Acceleration Bias Estimation")
+    axs[2].set_ylabel("m/s²")
+    axs[2].legend()
+    axs[2].grid(axis='x', which='both')
 
-    # # Power
-    # axs[3].plot(idx, df["power_pred"].to_numpy(),     label="Predicted Power", color="steelblue", linewidth=3)
-    # axs[3].plot(idx, df["power_measured"].to_numpy(), label="Measured Power",  color="black", linewidth=3)
-    # axs[0].set_title("Estimated Power vs Measured")
-    # axs[3].set_ylabel("Power (W)")
-    # axs[3].set_xlabel("Time (s)")
-    # # Set x-ticks and labels so that x-axis shows time in seconds (idx/100)
-    # xticks = np.arange(0, 121 * 100, step=20 * 100)  # 0, 2000, 4000, ..., 12000
-    # xticks = xticks[xticks < len(idx)]  # Ensure ticks are within data range
-    # axs[3].set_xticks(xticks)
-    # axs[3].set_xticklabels((xticks / 100).astype(int))
-    # axs[3].legend()
-    # axs[3].grid(axis='x', which='both')
+    # Power
+    axs[3].plot(idx, df["power_pred"].to_numpy(),     label="Predicted Power", color="steelblue", linewidth=3)
+    axs[3].plot(idx, df["power_measured"].to_numpy(), label="Measured Power",  color="black", linewidth=3)
+    axs[3].set_title("Estimated Power vs Measured")
+    axs[3].set_ylim(-150, 600)
+    axs[3].set_ylabel("Power (W)")
+    axs[3].set_xlabel("Time (s)")
+    # Set x-ticks and labels so that x-axis shows time in seconds (idx/100)
+    xticks = np.arange(0, 121 * 100, step=20 * 100)  # 0, 2000, 4000, ..., 12000
+    xticks = xticks[xticks < len(idx)]  # Ensure ticks are within data range
+    axs[3].set_xticks(xticks)
+    axs[3].set_xticklabels((xticks / 100).astype(int))
+    axs[3].legend()
+    axs[3].grid(axis='x', which='both')
 
-    # plt.tight_layout()
-    # save_path = os.path.join(
-    #     plot_dir, f"ukf_results_{log_number_str}_{test_date}_{stop_distance}m.png"
-    # )
-    # plt.savefig(save_path, dpi=1000)
-    # plt.show()
-    # plt.close(fig)
-    # print(f"Plot saved to {save_path}")
+    plt.tight_layout()
+    save_path = os.path.join(
+        plot_dir, f"ukf_results_{log_number_str}_{test_date}_{stop_distance}m.png"
+    )
+    plt.savefig(save_path, dpi=600)
+    plt.savefig(save_path.replace(".png", ".svg"), format="svg", dpi=600)
+    plt.show()
+    plt.close(fig)
+    print(f"Plot saved to {save_path}")
 
 
-    # optimiazed_df = "Optimisation_results\optimisation_results_001_06_01_2025_805m.csv"
-    # opt_df = load_data(optimiazed_df)
+    optimiazed_df = "Optimisation_results\optimisation_results_001_06_01_2025_805m.csv"
+    opt_df = load_data(optimiazed_df)
 
     

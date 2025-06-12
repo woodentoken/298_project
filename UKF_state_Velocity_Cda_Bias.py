@@ -186,7 +186,7 @@ def build_objective(
         alpha, beta, kappa, Q_v, Q_CdA, Q_bias, R_crank, x0_CdA, x0_bias = params
 
         # build noise & initials
-        Q   = np.diag([Q_v**2, Q_CdA**2, Q_bias**2])
+        Q   = np.diag([Q_v, Q_CdA, Q_bias])
         R   = R_crank
         x   = np.array([float(acceleration_df["velocity (m/s)"].iat[0]), x0_CdA, x0_bias])
         P   = np.diag([0.2**2, 0.05**2, 0.5**2])
@@ -308,19 +308,19 @@ if __name__ == "__main__":
 
     v0 = float(garmin_df["velocity (m/s)"].iloc[0])
     search_space = [
-        Real(1e-4, 0.1,   name="alpha",   prior="log-uniform"),    # spread
-        Real(1.99,  2.01,    name="beta"),                         # keep ~2
-        Real(0.0,  1.0,    name="kappa"),                          # often 0
-        Real(0.3,  1.0,    name="Q_v"),                            # Q_v  (m s⁻¹)
-        Real(0.01, 0.3,    name="Q_CdA"),                          # Q_CdA
-        Real(0.1,  1.5,    name="Q_bias"),                         # Q_bias
-        Real(15.0, 1000.0,  name="R_crank"),                       # crank-P 
-        Real(0.1,  0.6,    name="x0_CdA"),                         # initial CdA
-        Real(0, 2.0,    name="x0_bias")                            # initial bias
+        Real(1e-6, 0.001,   name="alpha",   prior="log-uniform"),    # spread
+        Real(1.999,  2.001,    name="beta"),                         # keep ~2
+        Real(0.0,  0.0001,    name="kappa"),                         # often 0
+        Real(0.0,  0.05,    name="Q_v"),                             # Q_v  (m s⁻¹)
+        Real(0.001,  0.1,    name="Q_CdA"),                          # Q_CdA
+        Real(0.5,  2,    name="Q_bias"),                             # Q_bias
+        Real(5.0, 300.0,  name="R_crank"),                           # crank-P 
+        Real(0.0,  0.3,    name="x0_CdA"),                           # initial CdA
+        Real(0, 2.0,    name="x0_bias")                              # initial bias
     ]
 
     n_iterations = 200
-    random_state = 1  # for reproducibility
+    random_state = 2  # for reproducibility
 
     # run optimisation
     result, df_trials = optimise_ukf(
